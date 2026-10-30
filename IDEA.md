@@ -4,31 +4,33 @@ Pain point: Có nhiều người thường chụp nhiều ảnh chụp màn hìn
 Thiết kế ứng dụng:
 
 Phần 1: Kiến trúc hệ thống tổng thể (Hybrid + On-Device PII Security)
-+---------------------------------------------------------------------------------------------+
-|                                ON-DEVICE (Client App)                                       |
-|                                                                                             |
-|  [Chụp ảnh màn hình] ──> [File Watcher nhẹ] ──> [Hàng đợi SQLite]                           |
-|                                                     │                                       |
-|  [Lưu trữ ảnh mã hóa cục bộ] <── [Apple Vision / Google ML Kit OCR]                         |
-|            │                                        │                                       |
-|            │ (Ảnh gốc GIỮ NGUYÊN trên máy)          ▼                                       |
-|            │                          [Bộ lọc PII cục bộ (Regex & Heuristics)]              |
-|            │                          (Che/xóa thông tin nhạy cảm: số thẻ, mật khẩu...)     |
-|            │                                        │                                       |
-|            │                                        ▼ (Chỉ gửi văn bản đã làm sạch PII)     |
-+------------│----------------------------------------│---------------------------------------+
-             │                                        │
-             │                                        ▼
-             │                          +--------------------------+
-             │                          |     CLOUD AI BACKEND     |
-             │                          |  (Phân tích ý định JSON) |
-             │                          +--------------------------+
-             │                                        │
-             │ (Metadata cấu trúc & JSON phản hồi) ───┘
-             ▼
+
++----------------------------------------------------------------------------------------+
+|                               ON-DEVICE (Client App)                                   |
+|                                                                                        |
+| [Chụp ảnh màn hình] ──> [File Watcher nhẹ] ──> [Hàng đợi SQLite]                       |
+|                                                    │                                   |
+| [Lưu trữ ảnh mã hóa cục bộ] <── [Apple Vision / Google ML Kit OCR]                     |
+|           │                                        │                                   |
+|           │ (Ảnh gốc GIỮ NGUYÊN trên máy)          ▼                                   |
+|           │                          [Bộ lọc PII cục bộ (Regex & Heuristics)]          |
+|           │                          (Che/xóa thông tin nhạy cảm: số thẻ, mật khẩu...) |
+|           │                                        │                                   |
+|           │                                        ▼ (Chỉ gửi văn bản đã làm sạch PII) |
++-----------│----------------------------------------│-----------------------------------+
+            │                                        │
+            │                                        ▼
+            │                          +-------------------------+
+            │                          |    CLOUD AI BACKEND     |
+            │                          | (Phân tích ý định JSON) |
+            │                          +-------------------------+
+            │                                        │
+            │ (Metadata cấu trúc & JSON phản hồi) ───┘
+            ▼
   [Database cục bộ SQLite: Tìm kiếm FTS5/Vector + Phân loại danh mục + Đồng bộ Lịch/Nhắc nhở]
 
 Phần 2: Pipeline xử lý từ đầu đến cuối (End-to-End Pipeline)
+
 Bước 1: Thu thập thụ động & Hàng đợi không tốn tài nguyên (Zero-Friction Passive Capture)
 Người dùng chụp ảnh màn hình bằng phím cứng như bình thường.
 
@@ -39,7 +41,7 @@ Bước 2: OCR cục bộ & Lọc sơ bộ ảnh rác (Pre-Filtering)
 
 Bộ lọc ảnh rác: Hệ thống kiểm tra nhanh xem ảnh có chứa từ khóa hành động hay văn bản có ích hay không. Nếu là meme, ảnh chụp màn hình khóa trắng, nó sẽ bị loại bỏ ngay lập tức và không tốn quota hay gọi API.
 
-Bước 3: Bộ lọc PII cục bộ (On-Device PII Scrubbing - MỚI)
+Bước 3: Bộ lọc PII cục bộ (On-Device PII Scrubbing)
 Trước khi bất kỳ đoạn văn bản OCR nào rời khỏi thiết bị, một mô-đun lọc PII cục bộ (sử dụng các biểu thức chính quy - Regex và quy tắc nhận diện mẫu) sẽ tự động quét và che/xóa các thông tin nhạy cảm như:
 
 Số thẻ tín dụng / tài khoản ngân hàng.
@@ -70,7 +72,9 @@ Tìm kiếm: Lưu trữ metadata vào SQLite tích hợp FTS5 (và Vector Search
 Aging Monitor: Kiểm tra định kỳ thời gian lưu trữ. Nếu ảnh quá hạn theo cài đặt, hiển thị thông báo dọn dẹp nhẹ nhàng.
 
 Phần 3: Tóm tắt Mô hình Kinh doanh & Đóng gói Tính năng (Freemium Packaging)
+
 Chiến lược phân chia sản phẩm giúp tối ưu hóa chuyển đổi từ miễn phí lên trả phí mà không gây ác cảm cho người dùng:
+
 Tính năng / Trải nghiệm  |  Gói Free (Miễn phí có giới hạn)           |  Gói Pro (Trả phí không giới hạn)
 Hạn mức xử lý AI         |  Tối đa 50 ảnh/tháng (Có bộ lọc ảnh rác)   |  Không giới hạn
 Bảo mật ảnh & PII        |  Bảo mật tuyệt đối (Ảnh lưu máy, lọc PII)  |  Bảo mật tuyệt đối (Ảnh lưu máy, lọc PII)
