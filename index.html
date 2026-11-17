@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Mobile Photo Gallery &amp; Folder Simulator</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- =========================================================================
+       Inline SVG Sprite Symbols (Reliable offline, zero CDN dependency)
+       ========================================================================= -->
+  <svg style="display: none;" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <!-- Search -->
+      <symbol id="icon-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"></circle>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </symbol>
+      <symbol id="search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"></circle>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </symbol>
+
+      <!-- Heart Fill -->
+      <symbol id="icon-heart-fill" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+      </symbol>
+      <symbol id="heart-fill" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+      </symbol>
+
+      <!-- Heart Outline -->
+      <symbol id="icon-heart-outline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+      </symbol>
+      <symbol id="heart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+      </symbol>
+      <symbol id="icon-heart" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+      </symbol>
+
+      <!-- Folder -->
+      <symbol id="icon-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+      </symbol>
+      <symbol id="folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+      </symbol>
+
+      <!-- Folder Plus -->
+      <symbol id="icon-folder-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+        <line x1="12" y1="11" x2="12" y2="17"></line>
+        <line x1="9" y1="14" x2="15" y2="14"></line>
+      </symbol>
+      <symbol id="folder-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+        <line x1="12" y1="11" x2="12" y2="17"></line>
+        <line x1="9" y1="14" x2="15" y2="14"></line>
+      </symbol>
+
+      <!-- Tag -->
+      <symbol id="icon-tag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+        <line x1="7" y1="7" x2="7.01" y2="7"></line>
+      </symbol>
+      <symbol id="tag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+        <line x1="7" y1="7" x2="7.01" y2="7"></line>
+      </symbol>
+
+      <!-- Tag Plus -->
+      <symbol id="icon-tag-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+        <line x1="7" y1="7" x2="7.01" y2="7"></line>
+        <line x1="11" y1="14" x2="15" y2="14"></line>
+        <line x1="13" y1="12" x2="13" y2="16"></line>
+      </symbol>
+      <symbol id="tag-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+        <line x1="7" y1="7" x2="7.01" y2="7"></line>
+        <line x1="11" y1="14" x2="15" y2="14"></line>
+        <line x1="13" y1="12" x2="13" y2="16"></line>
+      </symbol>
+
+      <!-- Camera -->
+      <symbol id="icon-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+        <circle cx="12" cy="13" r="4"></circle>
+      </symbol>
+      <symbol id="camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+        <circle cx="12" cy="13" r="4"></circle>
+      </symbol>
+
+      <!-- Photo / Image -->
+      <symbol id="icon-photo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+        <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor"></circle>
+        <polyline points="21 15 16 10 5 21"></polyline>
+      </symbol>
+      <symbol id="photo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+        <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor"></circle>
+        <polyline points="21 15 16 10 5 21"></polyline>
+      </symbol>
+
+      <!-- Plus -->
+      <symbol id="icon-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </symbol>
+      <symbol id="plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </symbol>
+
+      <!-- Trash -->
+      <symbol id="icon-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="3 6 5 6 21 6"></polyline>
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+        <line x1="10" y1="11" x2="10" y2="17"></line>
+        <line x1="14" y1="11" x2="14" y2="17"></line>
+      </symbol>
+      <symbol id="trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="3 6 5 6 21 6"></polyline>
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+        <line x1="10" y1="11" x2="10" y2="17"></line>
+        <line x1="14" y1="11" x2="14" y2="17"></line>
+      </symbol>
+
+      <!-- X-Close -->
+      <symbol id="icon-x-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="18" y1="6" x2="6" y2="18"></line>
+        <line x1="6" y1="6" x2="18" y2="18"></line>
+      </symbol>
+      <symbol id="x-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="18" y1="6" x2="6" y2="18"></line>
+        <line x1="6" y1="6" x2="18" y2="18"></line>
+      </symbol>
+
+      <!-- Check -->
+      <symbol id="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </symbol>
+      <symbol id="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </symbol>
+
+      <!-- Plane (Travel) -->
+      <symbol id="icon-plane" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M17.8 19.2L16 11l3.5-3.5C21 6 21.5 4 21 3.5c-.5-.5-2.5 0-4 1.5L13.5 8.5 5.3 6.7c-.8-.2-1.6.2-1.9.9l-.3.7c-.3.7 0 1.5.6 2l5.3 4.2-3.1 3.1-2.4-.4c-.4-.1-.8.1-1 .4l-.3.4c-.3.4-.2.9.2 1.3l2.8 2.3 2.3 2.8c.4.4.9.5 1.3.2l.4-.3c.3-.2.5-.6.4-1l-.4-2.4 3.1-3.1 4.2 5.3c.5.6 1.3.9 2 .6l.7-.3c.7-.3 1.1-1.1.9-1.9z"></path>
+      </symbol>
+      <symbol id="plane" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M17.8 19.2L16 11l3.5-3.5C21 6 21.5 4 21 3.5c-.5-.5-2.5 0-4 1.5L13.5 8.5 5.3 6.7c-.8-.2-1.6.2-1.9.9l-.3.7c-.3.7 0 1.5.6 2l5.3 4.2-3.1 3.1-2.4-.4c-.4-.1-.8.1-1 .4l-.3.4c-.3.4-.2.9.2 1.3l2.8 2.3 2.3 2.8c.4.4.9.5 1.3.2l.4-.3c.3-.2.5-.6.4-1l-.4-2.4 3.1-3.1 4.2 5.3c.5.6 1.3.9 2 .6l.7-.3c.7-.3 1.1-1.1.9-1.9z"></path>
+      </symbol>
+
+      <!-- Briefcase (Work) -->
+      <symbol id="icon-briefcase" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
+        <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
+      </symbol>
+      <symbol id="briefcase" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
+        <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
+      </symbol>
+
+      <!-- Leaf (Nature) -->
+      <symbol id="icon-leaf" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M11 20A7 7 0 0 1 4 13C4 7 11 3 20 3c0 9-4 16-9 17z"></path>
+        <path d="M4 13c3 0 7-1 10-4"></path>
+      </symbol>
+      <symbol id="leaf" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M11 20A7 7 0 0 1 4 13C4 7 11 3 20 3c0 9-4 16-9 17z"></path>
+        <path d="M4 13c3 0 7-1 10-4"></path>
+      </symbol>
+
+      <!-- User (Portraits) -->
+      <symbol id="icon-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+        <circle cx="12" cy="7" r="4"></circle>
+      </symbol>
+      <symbol id="user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+        <circle cx="12" cy="7" r="4"></circle>
+      </symbol>
+
+      <!-- Utensils (Food) -->
+      <symbol id="icon-utensils" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18 2v6a3 3 0 0 1-3 3 3 3 0 0 1-3-3V2M15 11v11M5 2v8a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V2M7 12v10"></path>
+      </symbol>
+      <symbol id="utensils" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18 2v6a3 3 0 0 1-3 3 3 3 0 0 1-3-3V2M15 11v11M5 2v8a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V2M7 12v10"></path>
+      </symbol>
+
+      <!-- Building (Architecture) -->
+      <symbol id="icon-building" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect>
+        <path d="M9 22v-4h6v4M8 6h.01M16 6h.01M8 10h.01M16 10h.01M8 14h.01M16 14h.01"></path>
+      </symbol>
+      <symbol id="building" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect>
+        <path d="M9 22v-4h6v4M8 6h.01M16 6h.01M8 10h.01M16 10h.01M8 14h.01M16 14h.01"></path>
+      </symbol>
+
+      <!-- Paw (Animals) -->
+      <symbol id="icon-paw" viewBox="0 0 24 24" fill="currentColor">
+        <circle cx="11" cy="4" r="2"></circle>
+        <circle cx="18" cy="8" r="2"></circle>
+        <circle cx="20" cy="16" r="2"></circle>
+        <path d="M9 10a5 5 0 0 0-5 5c0 3 2 5 5 5s5-2 5-5a5 5 0 0 0-5-5z"></path>
+        <circle cx="4" cy="8" r="2"></circle>
+      </symbol>
+      <symbol id="paw" viewBox="0 0 24 24" fill="currentColor">
+        <circle cx="11" cy="4" r="2"></circle>
+        <circle cx="18" cy="8" r="2"></circle>
+        <circle cx="20" cy="16" r="2"></circle>
+        <path d="M9 10a5 5 0 0 0-5 5c0 3 2 5 5 5s5-2 5-5a5 5 0 0 0-5-5z"></path>
+        <circle cx="4" cy="8" r="2"></circle>
+      </symbol>
+
+      <!-- Refresh / Reset -->
+      <symbol id="icon-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M23 4v6h-6M1 20v-6h6"></path>
+        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+      </symbol>
+      <symbol id="refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M23 4v6h-6M1 20v-6h6"></path>
+        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+      </symbol>
+
+      <!-- Sliders / Filter -->
+      <symbol id="icon-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="4" y1="21" x2="4" y2="14"></line>
+        <line x1="4" y1="10" x2="4" y2="3"></line>
+        <line x1="12" y1="21" x2="12" y2="12"></line>
+        <line x1="12" y1="8" x2="12" y2="3"></line>
+        <line x1="20" y1="21" x2="20" y2="16"></line>
+        <line x1="20" y1="12" x2="20" y2="3"></line>
+        <line x1="1" y1="14" x2="7" y2="14"></line>
+        <line x1="9" y1="8" x2="15" y2="8"></line>
+        <line x1="17" y1="16" x2="23" y2="16"></line>
+      </symbol>
+      <symbol id="sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="4" y1="21" x2="4" y2="14"></line>
+        <line x1="4" y1="10" x2="4" y2="3"></line>
+        <line x1="12" y1="21" x2="12" y2="12"></line>
+        <line x1="12" y1="8" x2="12" y2="3"></line>
+        <line x1="20" y1="21" x2="20" y2="16"></line>
+        <line x1="20" y1="12" x2="20" y2="3"></line>
+        <line x1="1" y1="14" x2="7" y2="14"></line>
+        <line x1="9" y1="8" x2="15" y2="8"></line>
+        <line x1="17" y1="16" x2="23" y2="16"></line>
+      </symbol>
+
+      <!-- Chevron Left -->
+      <symbol id="icon-chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="15 18 9 12 15 6"></polyline>
+      </symbol>
+      <symbol id="chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="15 18 9 12 15 6"></polyline>
+      </symbol>
+
+      <!-- Chevron Right -->
+      <symbol id="icon-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="9 18 15 12 9 6"></polyline>
+      </symbol>
+      <symbol id="chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="9 18 15 12 9 6"></polyline>
+      </symbol>
+    </defs>
+  </svg>
+
+  <!-- =========================================================================
+       Simulator Wrapper (Outer Frame)
+       ========================================================================= -->
+  <div class="simulator-wrapper">
+
+    <!-- Simulator Header Bar -->
+    <header class="simulator-header">
+      <div class="simulator-badge">
+        <span class="badge-dot"></span>
+        <span>Interactive App</span>
+      </div>
+      <div style="color: #94a3b8; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+        <span>📱 Mobile Photo &amp; Folder Simulator</span>
+      </div>
+      <div class="simulator-controls">
+        <button type="button" class="simulator-btn" id="btn-reset-data" title="Reset all data to default state">
+          <svg style="width: 14px; height: 14px;"><use href="#icon-refresh"></use></svg>
+          <span>Reset Default Data</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Mobile Phone Chassis -->
+    <div class="mobile-phone">
+
+      <!-- Status Bar -->
+      <div class="status-bar">
+        <span class="status-time" id="status-time">9:41</span>
+        <div class="dynamic-island">
+          <span class="dynamic-island-sensor"></span>
+          <span class="dynamic-island-lens"></span>
+        </div>
+        <div class="status-icons">
+          <!-- Cellular Signal -->
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M2 19h3v-3H2v3zm5 0h3v-7H7v7zm5 0h3V8h-3v11zm5 0h3V4h-3v15z"/>
+          </svg>
+          <!-- Wi-Fi -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/>
+          </svg>
+          <!-- Battery -->
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <rect x="2" y="7" width="18" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="2"/>
+            <rect x="4" y="9" width="11" height="6" rx="1"/>
+            <path d="M21 10.5v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- App Content Inside Phone -->
+      <div class="app-container">
+
+        <!-- App Header Bar -->
+        <header class="app-header">
+          <div class="app-header-main">
+            <div class="app-title-group">
+              <h1 class="app-title" id="view-title">All Photos</h1>
+              <span class="app-subtitle" id="view-subtitle">10 photos</span>
+            </div>
+            <div class="app-header-actions">
+              <button type="button" class="btn-icon" id="btn-toggle-favorite-filter" title="Filter Favorites" aria-label="Favorites Filter">
+                <svg style="width: 17px; height: 17px;"><use href="#icon-heart-outline"></use></svg>
+              </button>
+              <button type="button" class="btn-icon primary" id="btn-header-add" title="Add Photo" aria-label="Add Photo">
+                <svg style="width: 17px; height: 17px;"><use href="#icon-plus"></use></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Search Bar -->
+          <div class="search-bar" id="search-container">
+            <svg class="search-icon" viewBox="0 0 24 24"><use href="#icon-search"></use></svg>
+            <input type="text" id="search-input" placeholder="Search photos by title..." autocomplete="off">
+            <button type="button" class="search-clear-btn" id="btn-clear-search" aria-label="Clear Search">✕</button>
+          </div>
+
+          <!-- Category Carousel -->
+          <div class="category-carousel-wrapper" id="category-carousel-wrapper">
+            <div class="category-carousel" id="category-carousel">
+              <button type="button" class="category-pill active" data-category-id="all">
+                <span class="pill-dot"></span>
+                <span>All Photos</span>
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <!-- Main Content Scroll Area -->
+        <main class="scroll-container" id="main-scroll-container">
+
+          <!-- Active Filter Banner -->
+          <div id="active-filter-banner" class="hidden" style="display: flex; align-items: center; justify-content: space-between; background: var(--primary-light); border: 1px solid #bfdbfe; border-radius: var(--radius-md); padding: 8px 12px; font-size: 12px; color: var(--primary-dark);">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-weight: 600;" id="active-filter-label">Filter:</span>
+              <span class="category-pill active" id="active-filter-badge" style="padding: 2px 8px; font-size: 11px;">Active</span>
+            </div>
+            <button type="button" class="btn-icon" id="btn-reset-filter" title="Clear Filter" aria-label="Clear Filter" style="width: 24px; height: 24px; background: rgba(0,0,0,0.06); color: var(--primary-dark);">
+              <svg style="width: 12px; height: 12px;"><use href="#icon-x-close"></use></svg>
+            </button>
+          </div>
+
+          <!-- View 1: Photos View -->
+          <section id="view-photos" class="view-section">
+            <div class="section-header">
+              <h2 class="section-title">
+                <svg style="width: 16px; height: 16px;"><use href="#icon-photo"></use></svg>
+                <span id="photos-section-heading">Photos</span>
+              </h2>
+              <span class="section-counter" id="photos-count-badge">10 photos</span>
+            </div>
+
+            <!-- Photos Grid -->
+            <div class="photo-grid" id="photo-grid"></div>
+
+            <!-- Photos Empty State -->
+            <div class="empty-state hidden" id="photos-empty-state">
+              <div class="empty-icon-wrap">
+                <svg><use href="#icon-photo"></use></svg>
+              </div>
+              <h3 class="empty-title">No Photos Found</h3>
+              <p class="empty-desc">No photos match your current filter, folder selection, or search query.</p>
+              <button type="button" class="btn btn-primary" id="btn-empty-add-photo" style="margin-top: 6px;">
+                <svg style="width: 15px; height: 15px;"><use href="#icon-plus"></use></svg>
+                <span>Add Photo</span>
+              </button>
+            </div>
+          </section>
+
+          <!-- View 2: Folders View -->
+          <section id="view-folders" class="view-section hidden">
+            <div class="section-header">
+              <h2 class="section-title">
+                <svg style="width: 16px; height: 16px;"><use href="#icon-folder"></use></svg>
+                <span>Folders</span>
+              </h2>
+              <button type="button" class="btn btn-primary" id="btn-open-create-folder" style="padding: 6px 12px; font-size: 12px;">
+                <svg style="width: 14px; height: 14px;"><use href="#icon-folder-plus"></use></svg>
+                <span>New Folder</span>
+              </button>
+            </div>
+
+            <!-- Folders Grid -->
+            <div class="folder-grid" id="folder-grid"></div>
+
+            <!-- Folders Empty State -->
+            <div class="empty-state hidden" id="folders-empty-state">
+              <div class="empty-icon-wrap">
+                <svg><use href="#icon-folder"></use></svg>
+              </div>
+              <h3 class="empty-title">No Folders</h3>
+              <p class="empty-desc">Create custom folders to organize and group your photo collection.</p>
+            </div>
+          </section>
+
+          <!-- View 3: Categories View -->
+          <section id="view-categories" class="view-section hidden">
+            <div class="section-header">
+              <h2 class="section-title">
+                <svg style="width: 16px; height: 16px;"><use href="#icon-tag"></use></svg>
+                <span>Categories</span>
+              </h2>
+              <button type="button" class="btn btn-primary" id="btn-open-create-category" style="padding: 6px 12px; font-size: 12px;">
+                <svg style="width: 14px; height: 14px;"><use href="#icon-tag-plus"></use></svg>
+                <span>New Category</span>
+              </button>
+            </div>
+
+            <!-- Categories Grid -->
+            <div class="folder-grid" id="category-grid"></div>
+
+            <!-- Categories Empty State -->
+            <div class="empty-state hidden" id="categories-empty-state">
+              <div class="empty-icon-wrap">
+                <svg><use href="#icon-tag"></use></svg>
+              </div>
+              <h3 class="empty-title">No Categories</h3>
+              <p class="empty-desc">Create tags and categories to quickly filter photos across all folders.</p>
+            </div>
+          </section>
+
+          <!-- View 4: Add Photo View (Dormant container) -->
+          <section id="view-add-photo" class="view-section hidden" aria-hidden="true">
+            <div class="empty-state">
+              <div class="empty-icon-wrap">
+                <svg><use href="#icon-camera"></use></svg>
+              </div>
+              <h3 class="empty-title">Add Photos</h3>
+              <p class="empty-desc">Create or upload photos to your library.</p>
+              <button type="button" class="btn btn-primary" id="btn-open-add-modal" style="margin-top: 8px;">
+                <svg style="width: 16px; height: 16px;"><use href="#icon-plus"></use></svg>
+                <span>Open Photo Creator</span>
+              </button>
+            </div>
+          </section>
+
+        </main>
+
+        <!-- Floating Action Button -->
+        <button type="button" class="fab" id="btn-fab-add" title="Add Photo" aria-label="Add Photo">
+          <svg><use href="#icon-plus"></use></svg>
+        </button>
+
+        <!-- Bottom Navigation Bar -->
+        <nav class="bottom-nav">
+          <button type="button" class="nav-item active" data-tab="photos" aria-label="Photos Tab">
+            <svg><use href="#icon-photo"></use></svg>
+            <span>Photos</span>
+          </button>
+          <button type="button" class="nav-item" data-tab="folders" aria-label="Folders Tab">
+            <svg><use href="#icon-folder"></use></svg>
+            <span>Folders</span>
+          </button>
+          <button type="button" class="nav-item" data-tab="categories" aria-label="Categories Tab">
+            <svg><use href="#icon-tag"></use></svg>
+            <span>Categories</span>
+          </button>
+          <button type="button" class="nav-item" data-tab="add" aria-label="Add Photo Tab">
+            <svg><use href="#icon-plus"></use></svg>
+            <span>Add</span>
+          </button>
+        </nav>
+
+        <!-- Home Indicator Pill -->
+        <div class="home-indicator"></div>
+
+      </div>
+    </div>
+
+    <!-- =========================================================================
+         Modals & Bottom Sheets
+         ========================================================================= -->
+
+    <!-- Modal 1: Create Folder Modal -->
+    <div class="modal-backdrop" id="modal-create-folder" aria-hidden="true">
+      <div class="modal-sheet" role="dialog" aria-modal="true" aria-labelledby="modal-create-folder-title">
+        <div class="sheet-grabber"></div>
+        <div class="sheet-header">
+          <h2 class="sheet-title" id="modal-create-folder-title">Create New Folder</h2>
+          <button type="button" class="sheet-close-btn" id="btn-close-create-folder" aria-label="Close">
+            <svg style="width: 16px; height: 16px;"><use href="#icon-x-close"></use></svg>
+          </button>
+        </div>
+
+        <form id="form-create-folder">
+          <div class="form-group">
+            <label class="form-label" for="input-folder-name">Folder Name</label>
+            <input type="text" id="input-folder-name" class="form-input" placeholder="e.g. Summer Vacation" required maxlength="30" autocomplete="off">
+          </div>
+
+          <div class="form-group" style="margin-top: 6px;">
+            <label class="form-label">Folder Color</label>
+            <input type="hidden" id="input-folder-color" value="#3b82f6">
+            <div class="color-picker-group" id="folder-color-picker">
+              <button type="button" class="color-option selected" data-color="#3b82f6" style="background-color: #3b82f6;" title="Blue"></button>
+              <button type="button" class="color-option" data-color="#ef4444" style="background-color: #ef4444;" title="Red"></button>
+              <button type="button" class="color-option" data-color="#10b981" style="background-color: #10b981;" title="Emerald"></button>
+              <button type="button" class="color-option" data-color="#8b5cf6" style="background-color: #8b5cf6;" title="Purple"></button>
+              <button type="button" class="color-option" data-color="#f59e0b" style="background-color: #f59e0b;" title="Amber"></button>
+              <button type="button" class="color-option" data-color="#ec4899" style="background-color: #ec4899;" title="Pink"></button>
+              <button type="button" class="color-option" data-color="#06b6d4" style="background-color: #06b6d4;" title="Cyan"></button>
+              <button type="button" class="color-option" data-color="#64748b" style="background-color: #64748b;" title="Slate"></button>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-top: 6px;">
+            <label class="form-label">Folder Icon</label>
+            <input type="hidden" id="input-folder-icon" value="folder">
+            <div class="icon-selector-group" id="folder-icon-selector">
+              <button type="button" class="icon-option selected" data-icon="folder" title="Folder">
+                <svg style="width: 18px; height: 18px;"><use href="#icon-folder"></use></svg>
+              </button>
+              <button type="button" class="icon-option" data-icon="camera" title="Camera">
+                <svg style="width: 18px; height: 18px;"><use href="#icon-camera"></use></svg>
+              </button>
+              <button type="button" class="icon-option" data-icon="heart" title="Heart">
+                <svg style="width: 18px; height: 18px;"><use href="#icon-heart-fill"></use></svg>
+              </button>
+              <button type="button" class="icon-option" data-icon="plane" title="Travel">
+                <svg style="width: 18px; height: 18px;"><use href="#icon-plane"></use></svg>
+              </button>
+              <button type="button" class="icon-option" data-icon="briefcase" title="Work">
+                <svg style="width: 18px; height: 18px;"><use href="#icon-briefcase"></use></svg>
+              </button>
+              <button type="button" class="icon-option" data-icon="leaf" title="Nature">
+                <svg style="width: 18px; height: 18px;"><use href="#icon-leaf"></use></svg>
+              </button>
+              <button type="button" class="icon-option" data-icon="user" title="People">
+                <svg style="width: 18px; height: 18px;"><use href="#icon-user"></use></svg>
+              </button>
+              <button type="button" class="icon-option" data-icon="utensils" title="Dining">
+                <svg style="width: 18px; height: 18px;"><use href="#icon-utensils"></use></svg>
+              </button>
+              <button type="button" class="icon-option" data-icon="building" title="Places">
+                <svg style="width: 18px; height: 18px;"><use href="#icon-building"></use></svg>
+              </button>
+              <button type="button" class="icon-option" data-icon="paw" title="Pets">
+                <svg style="width: 18px; height: 18px;"><use href="#icon-paw"></use></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="modal-actions-row" style="margin-top: 14px;">
+            <button type="button" class="btn btn-secondary btn-block" id="btn-cancel-folder">Cancel</button>
+            <button type="submit" class="btn btn-primary btn-block" id="btn-submit-folder">Create Folder</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Modal 2: Create Category Modal -->
+    <div class="modal-backdrop" id="modal-create-category" aria-hidden="true">
+      <div class="modal-sheet" role="dialog" aria-modal="true" aria-labelledby="modal-create-category-title">
+        <div class="sheet-grabber"></div>
+        <div class="sheet-header">
+          <h2 class="sheet-title" id="modal-create-category-title">Create New Category</h2>
+          <button type="button" class="sheet-close-btn" id="btn-close-create-category" aria-label="Close">
+            <svg style="width: 16px; height: 16px;"><use href="#icon-x-close"></use></svg>
+          </button>
+        </div>
+
+        <form id="form-create-category">
+          <div class="form-group">
+            <label class="form-label" for="input-category-name">Category Name</label>
+            <input type="text" id="input-category-name" class="form-input" placeholder="e.g. Nature, Travel, Events" required maxlength="25" autocomplete="off">
+          </div>
+
+          <div class="form-group" style="margin-top: 6px;">
+            <label class="form-label">Category Color</label>
+            <input type="hidden" id="input-category-color" value="#6366f1">
+            <div class="color-picker-group" id="category-color-picker">
+              <button type="button" class="color-option selected" data-color="#6366f1" style="background-color: #6366f1;" title="Indigo"></button>
+              <button type="button" class="color-option" data-color="#10b981" style="background-color: #10b981;" title="Emerald"></button>
+              <button type="button" class="color-option" data-color="#f59e0b" style="background-color: #f59e0b;" title="Amber"></button>
+              <button type="button" class="color-option" data-color="#ef4444" style="background-color: #ef4444;" title="Red"></button>
+              <button type="button" class="color-option" data-color="#ec4899" style="background-color: #ec4899;" title="Pink"></button>
+              <button type="button" class="color-option" data-color="#3b82f6" style="background-color: #3b82f6;" title="Blue"></button>
+              <button type="button" class="color-option" data-color="#8b5cf6" style="background-color: #8b5cf6;" title="Purple"></button>
+              <button type="button" class="color-option" data-color="#06b6d4" style="background-color: #06b6d4;" title="Cyan"></button>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-top: 6px;">
+            <label class="form-label">Category Icon</label>
+            <input type="hidden" id="input-category-icon" value="tag">
+            <div class="icon-selector-group" id="category-icon-selector">
+              <button type="button" class="icon-option selected" data-icon="tag" title="Tag">
+                <svg style="width: 18px; height: 18px;"><use href="#icon-tag"></use></svg>
+              </button>
+              <button type="button" class="icon-option" data-icon="leaf" title="Nature">
+                <svg style="width: 18px; height: 18px;"><use href="#icon-leaf"></use></svg>
+              </button>
+              <button type="button" class="icon-option" data-icon="user" title="Portraits">
+                <svg style="width: 18px; height: 18px;"><use href="#icon-user"></use></svg>
+              </button>
+              <button type="button" class="icon-option" data-icon="utensils" title="Food">
+                <svg style="width: 18px; height: 18px;"><use href="#icon-utensils"></use></svg>
+              </button>
+              <button type="button" class="icon-option" data-icon="building" title="Architecture">
+                <svg style="width: 18px; height: 18px;"><use href="#icon-building"></use></svg>
+              </button>
+              <button type="button" class="icon-option" data-icon="paw" title="Animals">
+                <svg style="width: 18px; height: 18px;"><use href="#icon-paw"></use></svg>
+              </button>
+              <button type="button" class="icon-option" data-icon="plane" title="Travel">
+                <svg style="width: 18px; height: 18px;"><use href="#icon-plane"></use></svg>
+              </button>
+              <button type="button" class="icon-option" data-icon="camera" title="Camera">
+                <svg style="width: 18px; height: 18px;"><use href="#icon-camera"></use></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="modal-actions-row" style="margin-top: 14px;">
+            <button type="button" class="btn btn-secondary btn-block" id="btn-cancel-category">Cancel</button>
+            <button type="submit" class="btn btn-primary btn-block" id="btn-submit-category">Create Category</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Modal 3: Add Photo Modal / Sheet -->
+    <div class="modal-backdrop" id="modal-add-photo" aria-hidden="true">
+      <div class="modal-sheet" role="dialog" aria-modal="true" aria-labelledby="modal-add-photo-title">
+        <div class="sheet-grabber"></div>
+        <div class="sheet-header">
+          <h2 class="sheet-title" id="modal-add-photo-title">Add New Photo</h2>
+          <button type="button" class="sheet-close-btn" id="btn-close-add-photo" aria-label="Close">
+            <svg style="width: 16px; height: 16px;"><use href="#icon-x-close"></use></svg>
+          </button>
+        </div>
+
+        <form id="form-add-photo">
+          <div class="form-group">
+            <label class="form-label" for="input-photo-title">Photo Title</label>
+            <input type="text" id="input-photo-title" class="form-input" placeholder="e.g. Mountain Sunset Panorama" required maxlength="50" autocomplete="off">
+          </div>
+
+          <div class="form-group" style="margin-top: 6px;">
+            <label class="form-label" for="input-photo-url">Photo Image URL</label>
+            <input type="url" id="input-photo-url" class="form-input" placeholder="https://images.unsplash.com/..." required autocomplete="off">
+          </div>
+
+          <div class="form-group" style="margin-top: 6px;">
+            <label class="form-label">Or Pick a Quick Preset</label>
+            <div class="preset-photos-group" id="preset-photos-container" style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;">
+              <button type="button" class="preset-photo-btn" data-url="https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80" data-title="Tropical Turquoise Beach" style="flex: 0 0 52px; height: 52px; border-radius: 10px; border: 2px solid var(--neutral-200); overflow: hidden; padding: 0; cursor: pointer;">
+                <img src="https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=120&q=80" alt="Preset Beach" style="width: 100%; height: 100%; object-fit: cover; display: block;">
+              </button>
+              <button type="button" class="preset-photo-btn" data-url="https://images.unsplash.com/photo-1477959858617-67f30bc75b82?auto=format&fit=crop&w=1200&q=80" data-title="Golden Hour Cityscape" style="flex: 0 0 52px; height: 52px; border-radius: 10px; border: 2px solid var(--neutral-200); overflow: hidden; padding: 0; cursor: pointer;">
+                <img src="https://images.unsplash.com/photo-1477959858617-67f30bc75b82?auto=format&fit=crop&w=120&q=80" alt="Preset City" style="width: 100%; height: 100%; object-fit: cover; display: block;">
+              </button>
+              <button type="button" class="preset-photo-btn" data-url="https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=1200&q=80" data-title="Artisan Pour-Over Coffee" style="flex: 0 0 52px; height: 52px; border-radius: 10px; border: 2px solid var(--neutral-200); overflow: hidden; padding: 0; cursor: pointer;">
+                <img src="https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=120&q=80" alt="Preset Coffee" style="width: 100%; height: 100%; object-fit: cover; display: block;">
+              </button>
+              <button type="button" class="preset-photo-btn" data-url="https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=1200&q=80" data-title="Sunlit Forest Trail" style="flex: 0 0 52px; height: 52px; border-radius: 10px; border: 2px solid var(--neutral-200); overflow: hidden; padding: 0; cursor: pointer;">
+                <img src="https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=120&q=80" alt="Preset Forest" style="width: 100%; height: 100%; object-fit: cover; display: block;">
+              </button>
+              <button type="button" class="preset-photo-btn" data-url="https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=1200&q=80" data-title="Curious Orange Tabby Cat" style="flex: 0 0 52px; height: 52px; border-radius: 10px; border: 2px solid var(--neutral-200); overflow: hidden; padding: 0; cursor: pointer;">
+                <img src="https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=120&q=80" alt="Preset Cat" style="width: 100%; height: 100%; object-fit: cover; display: block;">
+              </button>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-top: 6px;">
+            <label class="form-label" for="select-photo-folder">Destination Folder</label>
+            <select id="select-photo-folder" class="form-select" required>
+              <option value="f-camera">Camera Roll</option>
+              <option value="f-favorites">Favorites</option>
+              <option value="f-travel">Travel 2026</option>
+              <option value="f-work">Work &amp; Docs</option>
+            </select>
+          </div>
+
+          <div class="form-group" style="margin-top: 6px;">
+            <label class="form-label">Assign Categories</label>
+            <div class="category-tags-selector" id="add-photo-categories">
+              <label class="tag-checkbox-pill">
+                <input type="checkbox" name="categories" value="c-nature">
+                <span>Nature</span>
+              </label>
+              <label class="tag-checkbox-pill">
+                <input type="checkbox" name="categories" value="c-portraits">
+                <span>Portraits</span>
+              </label>
+              <label class="tag-checkbox-pill">
+                <input type="checkbox" name="categories" value="c-food">
+                <span>Food &amp; Dining</span>
+              </label>
+              <label class="tag-checkbox-pill">
+                <input type="checkbox" name="categories" value="c-architecture">
+                <span>Architecture</span>
+              </label>
+              <label class="tag-checkbox-pill">
+                <input type="checkbox" name="categories" value="c-animals">
+                <span>Animals</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="modal-actions-row" style="margin-top: 14px;">
+            <button type="button" class="btn btn-secondary btn-block" id="btn-cancel-photo">Cancel</button>
+            <button type="submit" class="btn btn-primary btn-block" id="btn-submit-photo">Add Photo</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Modal 4: Photo Details & Management Sheet -->
+    <div class="modal-backdrop" id="modal-photo-details" aria-hidden="true">
+      <div class="modal-sheet" role="dialog" aria-modal="true" aria-labelledby="modal-photo-details-title">
+        <div class="sheet-grabber"></div>
+        <div class="sheet-header">
+          <h2 class="sheet-title" id="modal-photo-details-title">Photo Details</h2>
+          <button type="button" class="sheet-close-btn" id="btn-close-photo-details" aria-label="Close">
+            <svg style="width: 16px; height: 16px;"><use href="#icon-x-close"></use></svg>
+          </button>
+        </div>
+
+        <div class="photo-detail-view">
+          <div class="photo-detail-preview-box">
+            <img id="photo-detail-preview" class="photo-detail-preview-img" src="" alt="Photo Full View">
+          </div>
+
+          <div class="photo-detail-meta">
+            <h3 id="photo-detail-title" style="font-size: 14px; font-weight: 700; color: var(--neutral-900); max-width: 70%;" class="text-truncate">Photo Title</h3>
+            <span id="photo-detail-date">2026-08-15</span>
+          </div>
+
+          <div class="form-group" style="margin-top: 4px;">
+            <label class="form-label" for="photo-detail-folder-select">Folder Location</label>
+            <select id="photo-detail-folder-select" class="form-select">
+              <option value="f-camera">Camera Roll</option>
+              <option value="f-favorites">Favorites</option>
+              <option value="f-travel">Travel 2026</option>
+              <option value="f-work">Work &amp; Docs</option>
+            </select>
+          </div>
+
+          <div class="form-group" style="margin-top: 4px;">
+            <label class="form-label">Categories &amp; Tags</label>
+            <div class="category-tags-selector" id="photo-detail-categories-container"></div>
+          </div>
+
+          <div class="modal-actions-row" style="margin-top: 10px;">
+            <button type="button" class="btn btn-secondary btn-block" id="btn-detail-favorite">
+              <svg style="width: 16px; height: 16px;"><use href="#icon-heart-outline"></use></svg>
+              <span id="label-detail-favorite">Favorite</span>
+            </button>
+            <button type="button" class="btn btn-danger btn-block" id="btn-detail-delete">
+              <svg style="width: 16px; height: 16px;"><use href="#icon-trash"></use></svg>
+              <span>Delete Photo</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal 5: Confirmation Modal -->
+    <div class="modal-backdrop" id="modal-confirm" aria-hidden="true">
+      <div class="modal-sheet" role="dialog" aria-modal="true" aria-labelledby="confirm-title" style="max-height: 50%;">
+        <div class="sheet-grabber"></div>
+        <div class="sheet-header">
+          <h2 class="sheet-title" id="confirm-title">Confirm Delete</h2>
+          <button type="button" class="sheet-close-btn" id="btn-close-confirm" aria-label="Close">
+            <svg style="width: 16px; height: 16px;"><use href="#icon-x-close"></use></svg>
+          </button>
+        </div>
+
+        <p id="confirm-message" style="font-size: 13.5px; color: var(--neutral-600); line-height: 1.5; margin: 4px 0 10px;">
+          Are you sure you want to delete this? This action cannot be undone.
+        </p>
+
+        <div class="modal-actions-row">
+          <button type="button" class="btn btn-secondary btn-block" id="btn-confirm-cancel">Cancel</button>
+          <button type="button" class="btn btn-danger btn-block" id="btn-confirm-action">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toast-container" aria-live="polite"></div>
+
+  </div>
+
+  <!-- Scripts -->
+  <script src="store.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
