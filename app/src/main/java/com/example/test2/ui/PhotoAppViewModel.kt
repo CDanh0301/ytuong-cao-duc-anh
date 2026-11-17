@@ -34,6 +34,8 @@ import com.example.test2.services.ScreenshotDetectionManager
 import com.example.test2.services.ScreenshotJobScheduler
 import com.example.test2.services.ScreenshotQueueWorker
 import com.example.test2.services.ScreenshotWatcherService
+import com.example.test2.shared.models.ActionCard
+import com.example.test2.shared.models.ActionCardType
 import com.example.test2.shared.models.AgingSettings
 import com.example.test2.shared.models.Category
 import com.example.test2.shared.models.Folder
@@ -195,6 +197,20 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
     private val _agingMonitorInfo = MutableStateFlow(AgingMonitorManager.getLastCheckedInfo(application))
     val agingMonitorInfo: StateFlow<Triple<Long, Int, Long>> = _agingMonitorInfo.asStateFlow()
 
+    // Smart Action Cards filtering state
+    private val _activeActionCardType = MutableStateFlow(ActionCardType.ALL)
+    val activeActionCardType: StateFlow<ActionCardType> = _activeActionCardType.asStateFlow()
+
+    private val _actionCardPhotoCounts = MutableStateFlow<Map<ActionCardType, Int>>(emptyMap())
+    val actionCardPhotoCounts: StateFlow<Map<ActionCardType, Int>> = _actionCardPhotoCounts.asStateFlow()
+
+    fun refreshActionCardCounts() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val counts = dbHelper.getActionCardsPhotoCountByType()
+            _actionCardPhotoCounts.value = counts
+        }
+    }
+
     private var contentObserver: ContentObserver? = null
     private var pendingVaultScanAfterPermission = false
 
@@ -206,6 +222,7 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
 
         observeCloudAiSyncEvents()
         syncCompletedScreenshotsFromDb()
+        refreshActionCardCounts()
 
         if (_hasStoragePermission.value) {
             checkPrivacyConsentPrompt()
@@ -246,6 +263,7 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
                     repository.updatePhotoAiMetadataBatch(updates)
                 }
                 updateScanningState()
+                refreshActionCardCounts()
             }
         }
     }
@@ -292,6 +310,7 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
                 }
             }
             updateScanningState()
+            refreshActionCardCounts()
         }
     }
 
@@ -1508,6 +1527,22 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
         _activeTab.value = AppTab.PHOTOS
     }
 
+    fun setActionCardFilter(type: ActionCardType) {
+        _activeActionCardType.value = type
+        viewModelScope.launch(Dispatchers.IO) {
+            if (type == ActionCardType.ALL) {
+                repository.setActionCardFilter(null, null)
+            } else {
+                val matchingIds = dbHelper.getPhotoIdsByActionCardType(type)
+                repository.setActionCardFilter(type, matchingIds)
+            }
+        }
+    }
+
+    fun getActionCardsForPhoto(photoId: String): List<ActionCard> {
+        return dbHelper.getActionCardsForPhoto(photoId)
+    }
+
     private var searchJob: Job? = null
     // Phase 3: In-memory cache for query neural embeddings to prevent redundant network calls
     private val queryEmbeddingCache = java.util.concurrent.ConcurrentHashMap<String, FloatArray>()
@@ -1697,6 +1732,7 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun clearFilters() {
+        _activeActionCardType.value = ActionCardType.ALL
         repository.clearFilters()
     }
 

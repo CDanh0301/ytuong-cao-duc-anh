@@ -5,6 +5,8 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import com.example.test2.ai.VectorSemanticSearchEngine
+import com.example.test2.shared.models.ActionCard
+import com.example.test2.shared.models.ActionCardType
 import com.example.test2.shared.utils.VietnameseUtils
 import java.util.concurrent.ConcurrentHashMap
 
@@ -51,12 +53,13 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
 
     companion object {
         const val DATABASE_NAME = "smart_photo_manager.db"
-        const val DATABASE_VERSION = 8
+        const val DATABASE_VERSION = 9
 
         private const val TABLE_QUEUE = "screenshot_queue"
         private const val TABLE_FTS = "photo_fts"
         private const val TABLE_VECTORS = "photo_vectors"
         private const val TABLE_NEURAL_VECTORS = "photo_neural_vectors"
+        private const val TABLE_ACTION_CARDS = "photo_action_cards"
 
         @Volatile
         private var instance: AppDatabaseHelper? = null
@@ -141,6 +144,31 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
             );
             """.trimIndent()
         )
+
+        // 5. Smart Action Cards table (Phase: Smart Information Cards)
+        createActionCardsTable(db)
+    }
+
+    private fun createActionCardsTable(db: SQLiteDatabase) {
+        try {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS $TABLE_ACTION_CARDS (
+                    id TEXT PRIMARY KEY,
+                    photo_id TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    subtitle TEXT,
+                    payload_json TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    FOREIGN KEY(photo_id) REFERENCES $TABLE_QUEUE(photo_id) ON DELETE CASCADE
+                );
+                """.trimIndent()
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_action_cards_photo_id ON $TABLE_ACTION_CARDS(photo_id);")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_action_cards_type ON $TABLE_ACTION_CARDS(type);")
+        } catch (_: Exception) {
+        }
     }
 
     private fun createFtsTable(db: SQLiteDatabase) {
@@ -263,6 +291,12 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
             try {
                 db.execSQL("ALTER TABLE $TABLE_QUEUE ADD COLUMN photo_title TEXT;")
                 db.execSQL("ALTER TABLE $TABLE_QUEUE ADD COLUMN original_file_name TEXT;")
+            } catch (_: Exception) {
+            }
+        }
+        if (oldVersion < 9) {
+            try {
+                createActionCardsTable(db)
             } catch (_: Exception) {
             }
         }
@@ -1186,5 +1220,123 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
         } catch (_: Exception) {
         }
         return missingIds
+    }
+
+    // --- Smart Action Cards Operations (Phase: Smart Information Cards) ---
+
+    fun saveActionCards(cards: List<ActionCard>) {
+        if (cards.isEmpty()) return
+        try {
+            val db = writableDatabase
+            db.beginTransaction()
+            try {
+                for (card in cards) {
+                    val values = ContentValues().apply {
+                        put("id", card.id)
+                        put("photo_id", card.photoId)
+                        put("type", card.type.name)
+                        put("title", card.title)
+                        put("subtitle", card.subtitle)
+                        put("payload_json", card.payloadJson)
+                        put("created_at", if (card.createdAt > 0L) card.createdAt else System.currentTimeMillis())
+                    }
+                    db.insertWithOnConflict(TABLE_ACTION_CARDS, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+                }
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    fun getActionCardsForPhoto(photoId: String): List<ActionCard> {
+        val result = mutableListOf<ActionCard>()
+        try {
+            val db = readableDatabase
+            db.rawQuery(
+                "SELECT id, photo_id, type, title, subtitle, payload_json, created_at FROM $TABLE_ACTION_CARDS WHERE photo_id = ? ORDER BY created_at ASC",
+                arrayOf(photoId)
+            ).use { cursor ->
+                while (cursor.moveToNext()) {
+                    val id = cursor.getString(0)
+                    val pId = cursor.getString(1)
+                    val typeStr = cursor.getString(2)
+                    val title = cursor.getString(3)
+                    val subtitle = cursor.getString(4)
+                    val payloadJson = cursor.getString(5)
+                    val createdAt = cursor.getLong(6)
+                    val type = try {
+                        ActionCardType.valueOf(typeStr)
+                    } catch (_: Exception) {
+                        ActionCardType.ALL
+                    }
+                    result.add(
+                        ActionCard(
+                            id = id,
+                            photoId = pId,
+                            type = type,
+                            title = title,
+                            subtitle = subtitle,
+                            payloadJson = payloadJson,
+                            createdAt = createdAt
+                        )
+                    )
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return result
+    }
+
+    fun getPhotoIdsByActionCardType(type: ActionCardType): Set<String> {
+        val ids = mutableSetOf<String>()
+        try {
+            val db = readableDatabase
+            val cursor = if (type == ActionCardType.ALL) {
+                db.rawQuery("SELECT DISTINCT photo_id FROM $TABLE_ACTION_CARDS", null)
+            } else {
+                db.rawQuery("SELECT DISTINCT photo_id FROM $TABLE_ACTION_CARDS WHERE type = ?", arrayOf(type.name))
+            }
+            cursor.use {
+                while (it.moveToNext()) {
+                    ids.add(it.getString(0))
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return ids
+    }
+
+    fun getActionCardsPhotoCountByType(): Map<ActionCardType, Int> {
+        val counts = mutableMapOf<ActionCardType, Int>()
+        try {
+            val db = readableDatabase
+            db.rawQuery(
+                "SELECT type, COUNT(DISTINCT photo_id) FROM $TABLE_ACTION_CARDS GROUP BY type",
+                null
+            ).use { cursor ->
+                while (cursor.moveToNext()) {
+                    val typeStr = cursor.getString(0)
+                    val count = cursor.getInt(1)
+                    try {
+                        val type = ActionCardType.valueOf(typeStr)
+                        counts[type] = count
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return counts
+    }
+
+    fun deleteActionCardsForPhoto(photoId: String): Boolean {
+        return try {
+            val db = writableDatabase
+            db.delete(TABLE_ACTION_CARDS, "photo_id = ?", arrayOf(photoId)) > 0
+        } catch (_: Exception) {
+            false
+        }
     }
 }

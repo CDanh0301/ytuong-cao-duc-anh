@@ -49,6 +49,7 @@ import androidx.compose.ui.text.intl.Locale as ComposeLocale
 import androidx.compose.ui.text.intl.LocaleList
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Close
@@ -87,12 +88,24 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import android.net.Uri
+import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Directions
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.test2.shared.models.ActionCard
+import com.example.test2.shared.models.ActionCardType
 import com.example.test2.shared.models.Category
 import com.example.test2.shared.models.Folder
 import com.example.test2.shared.models.Photo
+import com.example.test2.ui.ActionCardIntentHelper
+import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -292,7 +305,8 @@ fun ImageViewerDialog(
     onDismiss: () -> Unit,
     onOpenSettings: (Photo) -> Unit,
     onToggleFavorite: (Photo) -> Unit,
-    onAddToCalendar: (Photo) -> Unit
+    onAddToCalendar: (Photo) -> Unit,
+    onGetActionCards: ((String) -> List<ActionCard>)? = null
 ) {
     if (photos.isEmpty()) return
 
@@ -318,6 +332,19 @@ fun ImageViewerDialog(
     val currentPhoto = photos.getOrNull(pagerState.currentPage) ?: photos.first()
     val currentFolder = folders.find { it.id == currentPhoto.folderId }
     val photoCategories = categories.filter { it.id in currentPhoto.categoryIds }
+
+    val actionCards = remember(currentPhoto.id) {
+        onGetActionCards?.invoke(currentPhoto.id) ?: emptyList()
+    }
+    var qrPreviewCard by remember { mutableStateOf<ActionCard?>(null) }
+
+    if (qrPreviewCard != null) {
+        QrPreviewDialog(
+            photo = currentPhoto,
+            card = qrPreviewCard!!,
+            onDismiss = { qrPreviewCard = null }
+        )
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -485,7 +512,7 @@ fun ImageViewerDialog(
                 }
             }
 
-            // Bottom overlay bar with Folder, Categories, and Calendar Action (IDEA.md)
+            // Bottom overlay bar with Smart Action Cards & clean folder info (Zero Clutter)
             AnimatedVisibility(
                 visible = showControls && dismissOffsetY.value < 50f,
                 enter = fadeIn(),
@@ -495,30 +522,17 @@ fun ImageViewerDialog(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color.Black.copy(alpha = 0.65f))
-                        .padding(horizontal = 16.dp, vertical = 20.dp)
+                        .background(Color.Black.copy(alpha = 0.70f))
+                        .padding(horizontal = 16.dp, vertical = 14.dp)
                 ) {
-                    // Intelligence / PII Banner if detected
-                    if (currentPhoto.piiScrubbedText != null) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                Icons.Default.Lock,
-                                contentDescription = null,
-                                tint = Color(0xFF10B981),
-                                modifier = Modifier.size(14.dp)
+                    // Smart Action Cards (Clean Action Pill Strip)
+                    if (actionCards.isNotEmpty()) {
+                        actionCards.forEach { card ->
+                            SmartActionCardBar(
+                                card = card,
+                                onOpenQr = { qrPreviewCard = card }
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Đã bảo vệ & làm sạch PII",
-                                fontSize = 11.sp,
-                                color = Color(0xFF10B981),
-                                fontWeight = FontWeight.SemiBold
-                            )
+                            Spacer(modifier = Modifier.height(8.dp))
                         }
                     }
 
@@ -566,43 +580,45 @@ fun ImageViewerDialog(
                             }
                         }
 
-                        // Add to Calendar Action Button (IDEA.md)
-                        val isShopping = currentPhoto.detectedIntent == "SHOPPING" || currentPhoto.categoryIds.contains("cat_tobuy")
-                        val isEvent = currentPhoto.detectedIntent == "EVENT" || currentPhoto.categoryIds.contains("cat_events") || currentPhoto.suggestedEventDateMillis != null
-                        val hasScheduleOrShopping = isShopping || isEvent
-                        if (hasScheduleOrShopping) {
-                            val buttonText = if (currentPhoto.hasReminderCreated) {
-                                "Đã lên lịch"
-                            } else if (isShopping) {
-                                "Đặt lịch mua"
-                            } else {
-                                "Thêm vào lịch"
-                            }
-                            val buttonBg = if (isShopping) Color(0xFFF59E0B) else Color(0xFF10B981)
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(buttonBg)
-                                    .clickable { onAddToCalendar(currentPhoto) }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        // Fallback Calendar Action Button if no Event Action Card
+                        if (actionCards.none { it.type == ActionCardType.EVENT }) {
+                            val isShopping = currentPhoto.detectedIntent == "SHOPPING" || currentPhoto.categoryIds.contains("cat_tobuy")
+                            val isEvent = currentPhoto.detectedIntent == "EVENT" || currentPhoto.categoryIds.contains("cat_events") || currentPhoto.suggestedEventDateMillis != null
+                            val hasScheduleOrShopping = isShopping || isEvent
+                            if (hasScheduleOrShopping) {
+                                val buttonText = if (currentPhoto.hasReminderCreated) {
+                                    "Đã lên lịch"
+                                } else if (isShopping) {
+                                    "Đặt lịch mua"
+                                } else {
+                                    "Thêm vào lịch"
+                                }
+                                val buttonBg = if (isShopping) Color(0xFFF59E0B) else Color(0xFF10B981)
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(buttonBg)
+                                        .clickable { onAddToCalendar(currentPhoto) }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        Icons.Default.CalendarMonth,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Text(
-                                        text = buttonText,
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.CalendarMonth,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Text(
+                                            text = buttonText,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -787,48 +803,11 @@ fun PhotoSettingsDialog(
                     color = Color(0xFF64748B)
                 )
 
-                // PII preview info or Scan button
-                if (!photo.piiScrubbedText.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFFF1F5F9))
-                            .padding(10.dp)
-                    ) {
-                        Column {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "Văn bản trích xuất (Đã lọc PII):",
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF334155)
-                                )
-                                Text(
-                                    text = "Quét lại OCR",
-                                    fontSize = 11.5.sp,
-                                    color = Color(0xFF3B82F6),
-                                    fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.clickable { onScanPhoto?.invoke(photo.id) }
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = photo.piiScrubbedText ?: "",
-                                fontSize = 11.sp,
-                                color = Color(0xFF475569)
-                            )
-                        }
-                    }
-                } else {
-                    Spacer(modifier = Modifier.height(8.dp))
+                // Minimal action button to re-scan if needed (Zero Clutter)
+                if (onScanPhoto != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
                     OutlinedButton(
-                        onClick = { onScanPhoto?.invoke(photo.id) },
+                        onClick = { onScanPhoto.invoke(photo.id) },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp)
                     ) {
@@ -840,7 +819,7 @@ fun PhotoSettingsDialog(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Quét & trích xuất văn bản (OCR)",
+                            text = if (!photo.isProcessed) "Quét & trích xuất thông tin" else "Quét lại ảnh",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Color(0xFF3B82F6)
@@ -915,6 +894,301 @@ fun PhotoSettingsDialog(
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
+            }
+        }
+    }
+}
+
+/**
+ * Smart Action Card Bar (Clean UI, 1-Tap Actions)
+ */
+@Composable
+fun SmartActionCardBar(
+    card: ActionCard,
+    onOpenQr: () -> Unit
+) {
+    val context = LocalContext.current
+    val payload = remember(card.payloadJson) {
+        try {
+            JSONObject(card.payloadJson)
+        } catch (_: Exception) {
+            JSONObject()
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color.White.copy(alpha = 0.12f))
+            .border(1.dp, Color.White.copy(alpha = 0.20f), RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+    ) {
+        // Card Title & Subtitle
+        Text(
+            text = card.title,
+            fontSize = 13.5.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        val subtitleText = card.subtitle
+        if (!subtitleText.isNullOrBlank()) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = subtitleText,
+                fontSize = 12.sp,
+                color = Color(0xFFCBD5E1),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 1-Tap Action Pill Buttons
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            when (card.type) {
+                ActionCardType.ADDRESS -> {
+                    val fullAddress = payload.optString("fullAddress", subtitleText ?: "")
+                    OneTapActionButton(
+                        label = "Chỉ đường Maps",
+                        icon = Icons.Default.Directions,
+                        backgroundColor = Color(0xFF2563EB),
+                        onClick = { ActionCardIntentHelper.openGoogleMaps(context, fullAddress) }
+                    )
+                    OneTapActionButton(
+                        label = "Sao chép",
+                        icon = Icons.Default.ContentCopy,
+                        backgroundColor = Color.White.copy(alpha = 0.22f),
+                        onClick = { ActionCardIntentHelper.copyToClipboard(context, "Địa chỉ", fullAddress) }
+                    )
+                }
+
+                ActionCardType.PAYMENT -> {
+                    val acc = payload.optString("accountNumber", "")
+                    val bank = payload.optString("bankName", "")
+                    val content = payload.optString("transferContent", "")
+                    val rawQr = payload.optString("rawQrString", "")
+
+                    if (acc.isNotBlank()) {
+                        OneTapActionButton(
+                            label = "Chép STK",
+                            icon = Icons.Default.ContentCopy,
+                            backgroundColor = Color(0xFF0284C7),
+                            onClick = { ActionCardIntentHelper.copyToClipboard(context, "STK", acc, "Đã sao chép STK: $acc ($bank)") }
+                        )
+                    }
+                    if (content.isNotBlank()) {
+                        OneTapActionButton(
+                            label = "Chép nội dung",
+                            icon = Icons.Default.Description,
+                            backgroundColor = Color.White.copy(alpha = 0.22f),
+                            onClick = { ActionCardIntentHelper.copyToClipboard(context, "Nội dung CK", content) }
+                        )
+                    }
+                    if (rawQr.isNotBlank()) {
+                        OneTapActionButton(
+                            label = "Xem mã QR",
+                            icon = Icons.Default.QrCode,
+                            backgroundColor = Color(0xFF059669),
+                            onClick = onOpenQr
+                        )
+                    }
+                }
+
+                ActionCardType.CONTACT -> {
+                    val phone = payload.optString("phoneNumber", "")
+                    val name = payload.optString("name", "")
+                    val email = payload.optString("email", "")
+                    val company = payload.optString("company", "")
+
+                    if (phone.isNotBlank()) {
+                        OneTapActionButton(
+                            label = "Gọi điện",
+                            icon = Icons.Default.Phone,
+                            backgroundColor = Color(0xFF16A34A),
+                            onClick = { ActionCardIntentHelper.dialPhoneNumber(context, phone) }
+                        )
+                        OneTapActionButton(
+                            label = "Nhắn Zalo",
+                            icon = Icons.AutoMirrored.Filled.Chat,
+                            backgroundColor = Color(0xFF2563EB),
+                            onClick = { ActionCardIntentHelper.openZalo(context, phone) }
+                        )
+                    }
+                    OneTapActionButton(
+                        label = "Lưu danh bạ",
+                        icon = Icons.Default.PersonAdd,
+                        backgroundColor = Color.White.copy(alpha = 0.22f),
+                        onClick = { ActionCardIntentHelper.insertContact(context, name, phone, email, company) }
+                    )
+                }
+
+                ActionCardType.EVENT -> {
+                    val title = payload.optString("title", card.title.removePrefix("📅").trim())
+                    val time = payload.optLong("startTimeMillis", System.currentTimeMillis())
+                    val desc = payload.optString("description", "")
+                    OneTapActionButton(
+                        label = "Thêm vào lịch",
+                        icon = Icons.Default.CalendarMonth,
+                        backgroundColor = Color(0xFF10B981),
+                        onClick = { ActionCardIntentHelper.addToCalendar(context, title, time, desc) }
+                    )
+                }
+
+                else -> {}
+            }
+        }
+    }
+}
+
+@Composable
+fun OneTapActionButton(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    backgroundColor: Color,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(backgroundColor)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(13.5.dp)
+            )
+            Text(
+                text = label,
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+        }
+    }
+}
+
+@Composable
+fun QrPreviewDialog(
+    photo: Photo,
+    card: ActionCard,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val payload = remember(card.payloadJson) {
+        try { JSONObject(card.payloadJson) } catch (_: Exception) { JSONObject() }
+    }
+    val bank = payload.optString("bankName", "Ngân hàng")
+    val acc = payload.optString("accountNumber", "")
+    val holder = payload.optString("accountHolder", "")
+    val amount = payload.optDouble("amount", 0.0)
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .clip(RoundedCornerShape(20.dp)),
+            color = Color.White,
+            tonalElevation = 8.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Mã QR Chuyển Khoản",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A)
+                    )
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Đóng", tint = Color(0xFF64748B))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // The QR Image Preview
+                Box(
+                    modifier = Modifier
+                        .size(240.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xFFF8FAFC))
+                        .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(16.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(if (photo.filePath.startsWith("content://")) Uri.parse(photo.filePath) else File(photo.filePath))
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = "Mã QR",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize().padding(10.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Text(
+                    text = "$bank • $acc",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0284C7)
+                )
+                if (holder.isNotBlank()) {
+                    Text(
+                        text = holder,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF334155)
+                    )
+                }
+                if (amount > 0) {
+                    Text(
+                        text = "${java.text.DecimalFormat("#,###").format(amount)} đ",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF059669)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Button(
+                    onClick = {
+                        ActionCardIntentHelper.copyToClipboard(context, "STK", acc, "Đã sao chép STK: $acc ($bank)")
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
+                ) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.White)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Sao chép số tài khoản", color = Color.White, fontWeight = FontWeight.SemiBold)
+                }
             }
         }
     }

@@ -1,5 +1,6 @@
 package com.example.test2.shared.repository
 
+import com.example.test2.shared.models.ActionCardType
 import com.example.test2.shared.models.AgingSettings
 import com.example.test2.shared.models.AppData
 import com.example.test2.shared.models.Category
@@ -103,6 +104,10 @@ class PhotoRepository(
 
         if (filter.dateRange != null) {
             result = result.filter { it.dateAdded in filter.dateRange }
+        }
+
+        if (filter.actionCardType != null && filter.actionCardType != ActionCardType.ALL && filter.matchingPhotoIds != null && filter.searchQuery.isBlank()) {
+            result = result.filter { it.id in filter.matchingPhotoIds }
         }
 
         if (filter.searchQuery.isNotBlank()) {
@@ -297,6 +302,13 @@ class PhotoRepository(
 
     fun toggleScreenshotsFilter() {
         _currentFilter.value = _currentFilter.value.copy(onlyScreenshots = !_currentFilter.value.onlyScreenshots)
+    }
+
+    fun setActionCardFilter(actionCardType: ActionCardType?, matchingPhotoIds: Set<String>?) {
+        _currentFilter.value = _currentFilter.value.copy(
+            actionCardType = actionCardType,
+            matchingPhotoIds = if (actionCardType == null || actionCardType == ActionCardType.ALL) null else matchingPhotoIds
+        )
     }
 
     fun setSearchQuery(query: String, matchingPhotoIds: Set<String>? = null, dateRange: LongRange? = null) {

@@ -46,6 +46,26 @@ data class Category(
     val createdAt: Long = 0L
 )
 
+@Serializable
+enum class ActionCardType {
+    ALL,
+    ADDRESS,
+    PAYMENT,
+    CONTACT,
+    EVENT
+}
+
+@Serializable
+data class ActionCard(
+    val id: String,
+    val photoId: String,
+    val type: ActionCardType,
+    val title: String,
+    val subtitle: String? = null,
+    val payloadJson: String = "",
+    val createdAt: Long = 0L
+)
+
 enum class SortOption {
     DATE_DESC,
     DATE_ASC,
@@ -61,7 +81,8 @@ data class PhotoFilter(
     val onlyScreenshots: Boolean = false,
     val sortOption: SortOption = SortOption.DATE_DESC,
     val matchingPhotoIds: Set<String>? = null,
-    val dateRange: LongRange? = null
+    val dateRange: LongRange? = null,
+    val actionCardType: ActionCardType? = null
 )
 
 @Serializable

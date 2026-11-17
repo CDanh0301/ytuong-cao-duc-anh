@@ -14,6 +14,7 @@ import com.example.test2.ai.BatchPhotoItem
 import com.example.test2.ai.CloudAiBackendClient
 import com.example.test2.ai.CloudAiSyncNotifier
 import com.example.test2.ai.CloudAiConfigManager
+import com.example.test2.ai.LocalActionCardExtractor
 import com.example.test2.ai.LocalImageLabeler
 import com.example.test2.ai.MlKitOcrEngine
 import com.example.test2.ai.PiiScrubber
@@ -22,6 +23,7 @@ import com.example.test2.ai.VectorSemanticSearchEngine
 import com.example.test2.database.AppDatabaseHelper
 import com.example.test2.notifications.ScreenshotNotificationHelper
 import com.example.test2.security.PrivacyVaultManager
+import com.example.test2.shared.models.ActionCard
 import com.example.test2.shared.models.Category
 import com.example.test2.storage.AndroidFilePersistenceDriver
 import kotlinx.coroutines.Dispatchers
@@ -119,7 +121,8 @@ class ScreenshotQueueWorker(
                 val visualAnalysis: com.example.test2.ai.VisualAnalysisResult,
                 val scrubbedText: String,
                 val isJunk: Boolean,
-                val needsCloudAnalysis: Boolean
+                val needsCloudAnalysis: Boolean,
+                val actionCards: List<ActionCard> = emptyList()
             )
 
             val preprocessed = mutableListOf<PreprocessedItem>()
@@ -163,13 +166,26 @@ class ScreenshotQueueWorker(
                 }
 
                 val visualAnalysis = LocalImageLabeler.analyze(context, currentFilePath)
-                val scrubbedText = if (!item.scrubbedText.isNullOrBlank()) {
+                val rawOcrText = if (!item.scrubbedText.isNullOrBlank()) {
                     item.scrubbedText
                 } else {
-                    val ocrText = MlKitOcrEngine.recognizeText(context, currentFilePath)
-                    val piiResult = PiiScrubber.scrub(ocrText)
-                    piiResult.scrubbedText
+                    MlKitOcrEngine.recognizeText(context, currentFilePath)
                 }
+
+                // Extract Smart Action Cards on-device from raw text and QR code before PII scrubbing
+                val actionCards = LocalActionCardExtractor.extractCards(
+                    context = context,
+                    filePath = currentFilePath,
+                    photoId = item.photoId,
+                    rawOcrText = rawOcrText,
+                    photoTitle = title
+                )
+                if (actionCards.isNotEmpty()) {
+                    dbHelper.saveActionCards(actionCards)
+                }
+
+                val piiResult = PiiScrubber.scrub(rawOcrText)
+                val scrubbedText = piiResult.scrubbedText
 
                 dbHelper.updateQueueItemState(
                     photoId = item.photoId,
@@ -210,7 +226,7 @@ class ScreenshotQueueWorker(
                 }
 
                 preprocessed.add(
-                    PreprocessedItem(item, currentFilePath, fileName, title, visualAnalysis, scrubbedText, isJunk = false, needsCloudAnalysis = needsCloud)
+                    PreprocessedItem(item, currentFilePath, fileName, title, visualAnalysis, scrubbedText, isJunk = false, needsCloudAnalysis = needsCloud, actionCards = actionCards)
                 )
             }
 
@@ -290,6 +306,15 @@ class ScreenshotQueueWorker(
 
                 // Index in FTS5
                 val categoryDisplayName = userCategories.firstOrNull { it.id == parsed.targetCategoryId }?.name ?: parsed.targetCategoryId ?: ""
+                val cardKeywords = prep.actionCards.joinToString(" ") { "${it.title} ${it.subtitle ?: ""}" }
+                val combinedEntities = if (entitiesStr.isNotBlank() && cardKeywords.isNotBlank()) {
+                    "$entitiesStr $cardKeywords"
+                } else if (cardKeywords.isNotBlank()) {
+                    cardKeywords
+                } else {
+                    entitiesStr
+                }
+
                 dbHelper.indexPhotoFts(
                     photoId = item.photoId,
                     title = title,
@@ -297,7 +322,7 @@ class ScreenshotQueueWorker(
                     intent = parsed.detectedIntent,
                     categoryNames = categoryDisplayName,
                     semanticTags = semanticTagsStr,
-                    entities = entitiesStr,
+                    entities = combinedEntities.trim(),
                     summary = summary
                 )
 

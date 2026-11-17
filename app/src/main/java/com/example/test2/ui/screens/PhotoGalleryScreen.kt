@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.test2.shared.models.ActionCardType
 import com.example.test2.shared.models.Category
 import com.example.test2.shared.models.Folder
 import com.example.test2.shared.models.Photo
@@ -115,6 +116,9 @@ fun PhotoGalleryScreen(
     onClearFilters: () -> Unit,
     onAddPhotoClick: () -> Unit,
     onToggleTier: ((Boolean) -> Unit)? = null,
+    activeActionCardType: ActionCardType = ActionCardType.ALL,
+    actionCardPhotoCounts: Map<ActionCardType, Int> = emptyMap(),
+    onSelectActionCardType: (ActionCardType) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showSemanticSearchDialog by remember { mutableStateOf(false) }
@@ -145,6 +149,10 @@ fun PhotoGalleryScreen(
 
     val headingTitle = when {
         currentFilter.onlyFavorites -> "Ảnh yêu thích"
+        activeActionCardType == ActionCardType.ADDRESS -> "Địa chỉ & Địa điểm"
+        activeActionCardType == ActionCardType.PAYMENT -> "Thông tin chuyển khoản"
+        activeActionCardType == ActionCardType.CONTACT -> "Liên hệ & Danh bạ"
+        activeActionCardType == ActionCardType.EVENT -> "Lịch hẹn & Sự kiện"
         activeFolder != null -> activeFolder.name
         activeCategory != null -> activeCategory.name
         else -> "Tất cả ảnh"
@@ -153,7 +161,8 @@ fun PhotoGalleryScreen(
     val hasActiveFilter = currentFilter.folderId != null ||
             currentFilter.categoryId != null ||
             currentFilter.onlyFavorites ||
-            currentFilter.searchQuery.isNotBlank()
+            currentFilter.searchQuery.isNotBlank() ||
+            activeActionCardType != ActionCardType.ALL
 
     Column(
         modifier = modifier
@@ -375,7 +384,7 @@ fun PhotoGalleryScreen(
                 }
             }
 
-            // Category Carousel
+            // Smart Action Card Tabs (Replaces Category Carousel to avoid clutter)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -384,29 +393,80 @@ fun PhotoGalleryScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // "Tất cả ảnh" Pill
-                CategoryPill(
-                    name = "Tất cả ảnh",
-                    colorHex = "#2563EB",
-                    isActive = currentFilter.categoryId == null,
-                    onClick = { onSelectCategory(null) }
+                val allCount = allPhotosCount
+                val addrCount = actionCardPhotoCounts[ActionCardType.ADDRESS] ?: 0
+                val payCount = actionCardPhotoCounts[ActionCardType.PAYMENT] ?: 0
+                val contactCount = actionCardPhotoCounts[ActionCardType.CONTACT] ?: 0
+                val eventCount = actionCardPhotoCounts[ActionCardType.EVENT] ?: 0
+
+                // 1. Tất cả ảnh Tab
+                ActionCardTabPill(
+                    label = "Tất cả ảnh",
+                    badgeCount = allCount,
+                    color = Color(0xFF2563EB),
+                    isActive = activeActionCardType == ActionCardType.ALL && currentFilter.categoryId == null,
+                    onClick = { onSelectActionCardType(ActionCardType.ALL) }
                 )
 
-                // Dynamic Category Pills
-                categories.forEach { cat ->
-                    CategoryPill(
-                        name = cat.name,
-                        colorHex = cat.colorHex,
-                        isActive = currentFilter.categoryId == cat.id,
-                        onClick = {
-                            if (currentFilter.categoryId == cat.id) {
-                                onSelectCategory(null)
-                            } else {
-                                onSelectCategory(cat.id)
-                            }
+                // 2. 📍 Địa chỉ Tab
+                ActionCardTabPill(
+                    label = "📍 Địa chỉ",
+                    badgeCount = addrCount,
+                    color = Color(0xFFEF4444),
+                    isActive = activeActionCardType == ActionCardType.ADDRESS,
+                    onClick = {
+                        if (activeActionCardType == ActionCardType.ADDRESS) {
+                            onSelectActionCardType(ActionCardType.ALL)
+                        } else {
+                            onSelectActionCardType(ActionCardType.ADDRESS)
                         }
-                    )
-                }
+                    }
+                )
+
+                // 3. 💳 Chuyển khoản Tab
+                ActionCardTabPill(
+                    label = "💳 Chuyển khoản",
+                    badgeCount = payCount,
+                    color = Color(0xFF0EA5E9),
+                    isActive = activeActionCardType == ActionCardType.PAYMENT,
+                    onClick = {
+                        if (activeActionCardType == ActionCardType.PAYMENT) {
+                            onSelectActionCardType(ActionCardType.ALL)
+                        } else {
+                            onSelectActionCardType(ActionCardType.PAYMENT)
+                        }
+                    }
+                )
+
+                // 4. 👤 Liên hệ Tab
+                ActionCardTabPill(
+                    label = "👤 Liên hệ",
+                    badgeCount = contactCount,
+                    color = Color(0xFF8B5CF6),
+                    isActive = activeActionCardType == ActionCardType.CONTACT,
+                    onClick = {
+                        if (activeActionCardType == ActionCardType.CONTACT) {
+                            onSelectActionCardType(ActionCardType.ALL)
+                        } else {
+                            onSelectActionCardType(ActionCardType.CONTACT)
+                        }
+                    }
+                )
+
+                // 5. 📅 Lịch hẹn Tab
+                ActionCardTabPill(
+                    label = "📅 Lịch hẹn",
+                    badgeCount = eventCount,
+                    color = Color(0xFF10B981),
+                    isActive = activeActionCardType == ActionCardType.EVENT,
+                    onClick = {
+                        if (activeActionCardType == ActionCardType.EVENT) {
+                            onSelectActionCardType(ActionCardType.ALL)
+                        } else {
+                            onSelectActionCardType(ActionCardType.EVENT)
+                        }
+                    }
+                )
             }
         }
 
@@ -445,6 +505,10 @@ fun PhotoGalleryScreen(
                             Text(
                                 text = when {
                                     currentFilter.onlyFavorites -> "Yêu thích"
+                                    activeActionCardType == ActionCardType.ADDRESS -> "📍 Địa chỉ"
+                                    activeActionCardType == ActionCardType.PAYMENT -> "💳 Chuyển khoản"
+                                    activeActionCardType == ActionCardType.CONTACT -> "👤 Liên hệ"
+                                    activeActionCardType == ActionCardType.EVENT -> "📅 Lịch hẹn"
                                     activeFolder != null -> activeFolder.name
                                     activeCategory != null -> activeCategory.name
                                     currentFilter.searchQuery.isNotBlank() && currentFilter.dateRange != null -> "\"${currentFilter.searchQuery}\" • Thời gian"
@@ -888,6 +952,55 @@ private fun DisplayModeButton(
             tint = if (isSelected) Color(0xFF2563EB) else Color(0xFF64748B),
             modifier = Modifier.size(17.dp)
         )
+    }
+}
+
+@Composable
+fun ActionCardTabPill(
+    label: String,
+    badgeCount: Int,
+    color: Color,
+    isActive: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(if (isActive) color else color.copy(alpha = 0.10f))
+            .border(
+                width = 1.dp,
+                color = if (isActive) color else color.copy(alpha = 0.25f),
+                shape = RoundedCornerShape(20.dp)
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = label,
+                fontSize = 12.5.sp,
+                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
+                color = if (isActive) Color.White else Color(0xFF1E293B)
+            )
+            if (badgeCount > 0) {
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(if (isActive) Color.White.copy(alpha = 0.25f) else color.copy(alpha = 0.20f))
+                        .padding(horizontal = 6.dp, vertical = 1.dp)
+                ) {
+                    Text(
+                        text = "$badgeCount",
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isActive) Color.White else color
+                    )
+                }
+            }
+        }
     }
 }
 

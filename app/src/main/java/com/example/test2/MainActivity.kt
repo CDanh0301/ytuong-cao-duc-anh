@@ -122,6 +122,8 @@ class MainActivity : FragmentActivity() {
                 val semanticMatchScores by viewModel.semanticMatchScores.collectAsState()
                 val isVectorIndexing by viewModel.isVectorIndexing.collectAsState()
                 val agingMonitorInfo by viewModel.agingMonitorInfo.collectAsState()
+                val activeActionCardType by viewModel.activeActionCardType.collectAsState()
+                val actionCardPhotoCounts by viewModel.actionCardPhotoCounts.collectAsState()
                 val retroactiveCategoryPrompt by viewModel.retroactiveCategoryPrompt.collectAsState()
                 val retroactiveScanningCategory by viewModel.retroactiveScanningCategory.collectAsState()
                 val noMatchesCategory by viewModel.noMatchesCategory.collectAsState()
@@ -345,6 +347,9 @@ class MainActivity : FragmentActivity() {
                                     onSelectCategory = { viewModel.filterByCategory(it) },
                                     onSearchChange = { viewModel.setSearchQuery(it) },
                                     onClearFilters = { viewModel.clearFilters() },
+                                    activeActionCardType = activeActionCardType,
+                                    actionCardPhotoCounts = actionCardPhotoCounts,
+                                    onSelectActionCardType = { viewModel.setActionCardFilter(it) },
                                     semanticMatchScores = semanticMatchScores,
                                     isVectorIndexing = isVectorIndexing,
                                     onToggleTier = { viewModel.toggleUserTier(it) },
@@ -473,6 +478,9 @@ class MainActivity : FragmentActivity() {
                                 viewModel.markReminderCreated(photo.id)
                             } catch (_: Exception) {
                             }
+                        },
+                        onGetActionCards = { pId ->
+                            viewModel.getActionCardsForPhoto(pId)
                         }
                     )
                 }
