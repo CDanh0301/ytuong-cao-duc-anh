@@ -1,6 +1,7 @@
 package com.example.test2.ai
 
 import android.content.Context
+import com.example.test2.ai.cards.QualityFlags
 import com.example.test2.database.AppDatabaseHelper
 import com.example.test2.database.DefaultCategories
 import com.example.test2.database.ProcessedScreenshotRecord
@@ -89,8 +90,20 @@ class PhotoProcessingCoordinator(
             return@withContext
         }
 
-        // Step 2: Unified On-Device Vision Analysis (ML Kit Image Labeling)
-        val visualAnalysis = LocalImageLabeler.analyze(context, photo.filePath)
+        android.util.Log.d("PhotoCoordinator", "Starting runOnDevicePipeline for ${photo.id}: ${photo.fileName}, filePath=${photo.filePath}")
+        // Step 2: Unified On-Device Vision & OCR Analysis
+        val onDeviceResult = if (QualityFlags.SHARED_DECODE) {
+            OnDeviceAnalysis.analyze(context, photo.id, photo.filePath, photo.title)
+        } else null
+
+        val visualAnalysis = onDeviceResult?.visual ?: LocalImageLabeler.analyze(context, photo.filePath)
+        android.util.Log.d("PhotoCoordinator", "visualAnalysis for ${photo.id}: nature=${visualAnalysis.isNature}, animal=${visualAnalysis.isAnimal}, labels=${visualAnalysis.rawLabels}")
+
+        // Save cards immediately on device if available
+        if (QualityFlags.INSTANT_EXTRACTION && onDeviceResult != null && onDeviceResult.cards.isNotEmpty()) {
+            dbHelper.replaceActionCardsForPhoto(photo.id, onDeviceResult.cards)
+            CloudAiSyncNotifier.notifyBatchCompleted(listOf(photo.id))
+        }
 
         // Short-Circuit Optimization: Pure Nature, Landscape, Scenery & Animal photos without text
         if ((visualAnalysis.isNature || visualAnalysis.isAnimal) && !visualAnalysis.hasTextOrDoc) {
@@ -148,8 +161,8 @@ class PhotoProcessingCoordinator(
             return@withContext
         }
 
-        // Step 3: Local OCR & Vision Analysis on device
-        val ocrText = MlKitOcrEngine.recognizeText(context, photo.filePath)
+        // Step 3: Local OCR text evaluation
+        val ocrText = onDeviceResult?.ocr?.flatText ?: MlKitOcrEngine.recognizeText(context, photo.filePath)
         val hasFace = visualAnalysis.isPerson
 
         if (ocrText.isBlank() || ocrText.trim().length < 4) {
@@ -319,24 +332,50 @@ class PhotoProcessingCoordinator(
         photo: Photo,
         targetFolderId: String? = null
     ) = withContext(Dispatchers.IO) {
-        val visualAnalysis = LocalImageLabeler.analyze(context, photo.filePath)
+        val onDeviceResult = if (QualityFlags.SHARED_DECODE) {
+            OnDeviceAnalysis.analyze(context, photo.id, photo.filePath, photo.title)
+        } else null
+
+        val visualAnalysis = onDeviceResult?.visual ?: LocalImageLabeler.analyze(context, photo.filePath)
         val hasFace = visualAnalysis.isPerson
-        val ocrText = if ((visualAnalysis.isNature || visualAnalysis.isAnimal) && !visualAnalysis.hasTextOrDoc) {
+        val ocrText = onDeviceResult?.ocr?.flatText ?: if ((visualAnalysis.isNature || visualAnalysis.isAnimal) && !visualAnalysis.hasTextOrDoc) {
             ""
         } else {
             MlKitOcrEngine.recognizeText(context, photo.filePath)
         }
-        val piiResult = PiiScrubber.scrub(ocrText)
+        val piiResult = onDeviceResult?.let { PiiScrubResult(it.scrubbedText, false) } ?: PiiScrubber.scrub(ocrText)
 
-        val parsed = CloudAiBackendClient.analyzeWithFallback(
-            context = context,
+        // Save cards immediately on device if available
+        if (QualityFlags.INSTANT_EXTRACTION && onDeviceResult != null && onDeviceResult.cards.isNotEmpty()) {
+            dbHelper.replaceActionCardsForPhoto(photo.id, onDeviceResult.cards)
+            CloudAiSyncNotifier.notifyBatchCompleted(listOf(photo.id))
+        }
+
+        val privacyDecision = PrivacyPolicy.classify(
             scrubbedText = piiResult.scrubbedText,
             photoTitle = photo.title,
-            categories = repository.categories.value,
-            isPro = repository.accountTier.value.isPro,
-            hasFace = hasFace,
             visualLabels = visualAnalysis.rawLabels
         )
+
+        val parsed = if (privacyDecision == PrivacyDecision.LOCAL_ONLY) {
+            SmartHeuristicParser.parse(
+                scrubbedText = piiResult.scrubbedText,
+                photoTitle = photo.title,
+                customCategories = if (repository.accountTier.value.isPro) repository.categories.value else emptyList(),
+                hasFace = hasFace,
+                visualLabels = visualAnalysis.rawLabels
+            )
+        } else {
+            CloudAiBackendClient.analyzeWithFallback(
+                context = context,
+                scrubbedText = piiResult.scrubbedText,
+                photoTitle = photo.title,
+                categories = repository.categories.value,
+                isPro = repository.accountTier.value.isPro,
+                hasFace = hasFace,
+                visualLabels = visualAnalysis.rawLabels
+            )
+        }
 
         val categoryNames = repository.categories.value
             .filter { it.id == parsed.targetCategoryId }
@@ -360,8 +399,8 @@ class PhotoProcessingCoordinator(
         )
         dbHelper.savePhotoVector(photo.id, embedding, parsed.detectedIntent)
 
-        // 768D Neural Vector (Pro tier with API Key)
-        if (repository.accountTier.value.isPro && piiResult.scrubbedText.isNotBlank()) {
+        // 768D Neural Vector (Pro tier with API Key, only for CLOUD_ELIGIBLE)
+        if (privacyDecision == PrivacyDecision.CLOUD_ELIGIBLE && repository.accountTier.value.isPro && piiResult.scrubbedText.isNotBlank()) {
             val apiKey = CloudAiConfigManager.getApiKey(context)
             if (apiKey.isNotBlank()) {
                 val neuralVec = CloudAiBackendClient.getEmbedding(piiResult.scrubbedText, apiKey)

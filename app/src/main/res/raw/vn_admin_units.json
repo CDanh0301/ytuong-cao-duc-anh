@@ -1,0 +1,43 @@
+{
+  "provinces": [
+    { "name": "Hà Nội", "aliases": ["Ha Noi", "HN", "Thủ đô Hà Nội", "TP Hà Nội", "TP. Hà Nội"], "status": "current" },
+    { "name": "TP. Hồ Chí Minh", "aliases": ["TP.HCM", "TP HCM", "TPHCM", "Hồ Chí Minh", "Ho Chi Minh", "Sài Gòn", "Sai Gon", "SG", "Bình Dương", "Binh Duong", "Bà Rịa", "Vũng Tàu", "Vung Tau", "Bà Rịa - Vũng Tàu"], "status": "current" },
+    { "name": "TP. Đà Nẵng", "aliases": ["Đà Nẵng", "Da Nang", "ĐN", "Quảng Nam", "Quang Nam", "Tam Kỳ"], "status": "current" },
+    { "name": "TP. Hải Phòng", "aliases": ["Hải Phòng", "Hai Phong", "HP", "Hải Dương", "Hai Duong"], "status": "current" },
+    { "name": "TP. Cần Thơ", "aliases": ["Cần Thơ", "Can Tho", "Sóc Trăng", "Soc Trang", "Hậu Giang", "Hau Giang"], "status": "current" },
+    { "name": "Huế", "aliases": ["Thừa Thiên Huế", "Thua Thien Hue", "TP. Huế", "TP Huế"], "status": "current" },
+    { "name": "Lai Châu", "aliases": ["Lai Chau"], "status": "current" },
+    { "name": "Điện Biên", "aliases": ["Dien Bien"], "status": "current" },
+    { "name": "Sơn La", "aliases": ["Son La"], "status": "current" },
+    { "name": "Lạng Sơn", "aliases": ["Lang Son"], "status": "current" },
+    { "name": "Quảng Ninh", "aliases": ["Quang Ninh", "Hạ Long"], "status": "current" },
+    { "name": "Thanh Hóa", "aliases": ["Thanh Hoa"], "status": "current" },
+    { "name": "Nghệ An", "aliases": ["Nghe An", "Vinh"], "status": "current" },
+    { "name": "Hà Tĩnh", "aliases": ["Ha Tinh"], "status": "current" },
+    { "name": "Cao Bằng", "aliases": ["Cao Bang"], "status": "current" },
+    { "name": "Tuyên Quang", "aliases": ["Tuyen Quang", "Hà Giang", "Ha Giang"], "status": "current" },
+    { "name": "Lào Cai", "aliases": ["Lao Cai", "Yên Bái", "Yen Bai", "Sa Pa"], "status": "current" },
+    { "name": "Thái Nguyên", "aliases": ["Thai Nguyen", "Bắc Kạn", "Bac Kan"], "status": "current" },
+    { "name": "Phú Thọ", "aliases": ["Phu Tho", "Vĩnh Phúc", "Vinh Phuc", "Hòa Bình", "Hoa Binh"], "status": "current" },
+    { "name": "Bắc Ninh", "aliases": ["Bac Ninh", "Bắc Giang", "Bac Giang"], "status": "current" },
+    { "name": "Hưng Yên", "aliases": ["Hung Yen", "Thái Bình", "Thai Binh"], "status": "current" },
+    { "name": "Ninh Bình", "aliases": ["Ninh Binh", "Hà Nam", "Ha Nam", "Nam Định", "Nam Dinh"], "status": "current" },
+    { "name": "Quảng Trị", "aliases": ["Quang Tri", "Quảng Bình", "Quang Binh", "Đồng Hới"], "status": "current" },
+    { "name": "Quảng Ngãi", "aliases": ["Quang Ngai", "Kon Tum"], "status": "current" },
+    { "name": "Gia Lai", "aliases": ["Bình Định", "Binh Dinh", "Quy Nhơn", "Pleiku"], "status": "current" },
+    { "name": "Khánh Hòa", "aliases": ["Khanh Hoa", "Nha Trang", "Ninh Thuận", "Ninh Thuan", "Phan Rang"], "status": "current" },
+    { "name": "Lâm Đồng", "aliases": ["Lam Dong", "Đà Lạt", "Da Lat", "Đắk Nông", "Dak Nong", "Bình Thuận", "Binh Thuan", "Phan Thiết"], "status": "current" },
+    { "name": "Đắk Lắk", "aliases": ["Dak Lak", "Đắc Lắc", "Buôn Ma Thuột", "Phú Yên", "Phu Yen", "Tuy Hòa"], "status": "current" },
+    { "name": "Đồng Nai", "aliases": ["Dong Nai", "Biên Hòa", "Bình Phước", "Binh Phuoc"], "status": "current" },
+    { "name": "Tây Ninh", "aliases": ["Tay Ninh", "Long An", "Tân An"], "status": "current" },
+    { "name": "Vĩnh Long", "aliases": ["Vinh Long", "Bến Tre", "Ben Tre", "Trà Vinh", "Tra Vinh"], "status": "current" },
+    { "name": "Đồng Tháp", "aliases": ["Dong Thap", "Cao Lãnh", "Tiền Giang", "Tien Giang", "Mỹ Tho"], "status": "current" },
+    { "name": "Cà Mau", "aliases": ["Ca Mau", "Bạc Liêu", "Bac Lieu"], "status": "current" },
+    { "name": "An Giang", "aliases": ["Long Xuyên", "Kiên Giang", "Kien Giang", "Rạch Giá", "Phú Quốc"] ,"status": "current" }
+  ],
+  "structuralKeywords": {
+    "admin": ["Tỉnh", "TP.", "TP", "Thành phố", "Quận", "Q.", "Q", "Huyện", "H.", "Thị xã", "TX.", "Thị trấn", "TT.", "Phường", "P.", "P", "Xã", "Đặc khu"],
+    "addressElements": ["Đường", "Phố", "Ngõ", "Ngách", "Hẻm", "Kiệt", "Khu phố", "KP", "Thôn", "Xóm", "Ấp", "KĐT", "Chung cư", "Tòa", "Tầng", "Số", "So"],
+    "labels": ["Địa chỉ", "Địa chi", "ĐC", "DC", "Address", "Location", "Cơ sở", "Co so", "Chi nhánh", "Chi nhanh"]
+  }
+}

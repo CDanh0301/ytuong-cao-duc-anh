@@ -56,6 +56,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 
 enum class AppTab {
@@ -609,6 +610,7 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
     // IDEA.md: Process unprocessed screenshots through ML Kit OCR, PII scrubber, Smart Heuristics & FTS5 indexing
     private suspend fun processNewScreenshots() {
         val currentPhotos = repository.photos.value
+        android.util.Log.d("PhotoTriage", "processNewScreenshots started, total photos: ${currentPhotos.size}")
         for (photo in currentPhotos) {
             // Never overwrite cloud-enriched photos
             if (photo.isCloudEnriched) {
@@ -1058,6 +1060,50 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
 
     fun getActionCardsForPhoto(photoId: String): List<ActionCard> {
         return dbHelper.getActionCardsForPhoto(photoId)
+    }
+
+    /**
+     * Reactively observes Smart Action Cards for a photo off the main thread.
+     * Automatically emits updates when cards are extracted or re-extracted.
+     */
+    fun observeActionCards(photoId: String): kotlinx.coroutines.flow.Flow<List<ActionCard>> = kotlinx.coroutines.flow.flow {
+        emit(dbHelper.getActionCardsForPhoto(photoId))
+
+        if (com.example.test2.ai.cards.QualityFlags.REEXTRACT_ON_OPEN) {
+            checkAndReextractCardsIfOld(photoId)
+        }
+
+        com.example.test2.ai.CloudAiSyncNotifier.syncEvents.collect { updatedPhotoIds ->
+            if (photoId in updatedPhotoIds) {
+                emit(dbHelper.getActionCardsForPhoto(photoId))
+            }
+        }
+    }.flowOn(Dispatchers.IO)
+
+    private fun checkAndReextractCardsIfOld(photoId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val existing = dbHelper.getActionCardsForPhoto(photoId)
+            val hasLegacyCards = existing.any { card ->
+                val ev = try {
+                    org.json.JSONObject(card.payloadJson).optInt("ev", 1)
+                } catch (_: Exception) { 1 }
+                ev < com.example.test2.ai.cards.CardIds.EXTRACTOR_VERSION
+            }
+            if (hasLegacyCards) {
+                val photo = repository.photos.value.find { it.id == photoId } ?: return@launch
+                val result = com.example.test2.ai.OnDeviceAnalysis.analyze(
+                    context = app,
+                    photoId = photoId,
+                    filePath = photo.filePath,
+                    photoTitle = photo.title
+                )
+                if (result != null) {
+                    dbHelper.replaceActionCardsForPhoto(photoId, result.cards)
+                    com.example.test2.ai.CloudAiSyncNotifier.notifyBatchCompleted(listOf(photoId))
+                    refreshActionCardCounts()
+                }
+            }
+        }
     }
 
     private var searchJob: Job? = null

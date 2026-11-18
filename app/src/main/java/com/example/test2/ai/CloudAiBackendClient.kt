@@ -81,8 +81,9 @@ object CloudAiBackendClient {
         visualLabels: List<String> = emptyList()
     ): ParsedScreenshotData = withContext(Dispatchers.IO) {
         val config = CloudAiConfigManager.getConfig(context)
+        val privacy = PrivacyPolicy.classify(scrubbedText, photoTitle, visualLabels)
 
-        if (!config.isEnabled || config.apiKey.isBlank()) {
+        if (privacy == PrivacyDecision.LOCAL_ONLY || !config.isEnabled || config.apiKey.isBlank()) {
             return@withContext SmartHeuristicParser.parse(
                 scrubbedText = scrubbedText,
                 photoTitle = photoTitle,
@@ -297,8 +298,27 @@ object CloudAiBackendClient {
     ): Map<String, ParsedScreenshotData> = withContext(Dispatchers.IO) {
         if (items.isEmpty()) return@withContext emptyMap()
         val config = CloudAiConfigManager.getConfig(context)
-        if (!config.isEnabled || config.apiKey.isBlank()) {
-            return@withContext items.associate { item ->
+
+        // Defense-in-depth: separate LOCAL_ONLY items from CLOUD_ELIGIBLE
+        val eligibleItems = items.filter {
+            PrivacyPolicy.classify(it.scrubbedText, it.photoTitle, it.visualLabels) == PrivacyDecision.CLOUD_ELIGIBLE
+        }
+        val localOnlyItems = items.filter {
+            PrivacyPolicy.classify(it.scrubbedText, it.photoTitle, it.visualLabels) == PrivacyDecision.LOCAL_ONLY
+        }
+
+        val localResults = localOnlyItems.associate { item ->
+            item.photoId to SmartHeuristicParser.parse(
+                scrubbedText = item.scrubbedText,
+                photoTitle = item.photoTitle,
+                customCategories = if (isPro) categories else emptyList(),
+                hasFace = item.hasFace,
+                visualLabels = item.visualLabels
+            )
+        }
+
+        if (!config.isEnabled || config.apiKey.isBlank() || eligibleItems.isEmpty()) {
+            val remainingLocal = eligibleItems.associate { item ->
                 item.photoId to SmartHeuristicParser.parse(
                     scrubbedText = item.scrubbedText,
                     photoTitle = item.photoTitle,
@@ -307,25 +327,27 @@ object CloudAiBackendClient {
                     visualLabels = item.visualLabels
                 )
             }
+            return@withContext (localResults + remainingLocal)
         }
 
         try {
             GeminiRateLimiter.acquire()
-            callGeminiBatchApi(
+            val cloudResults = callGeminiBatchApi(
                 apiKey = config.apiKey,
                 modelName = config.modelName,
                 customEndpoint = config.customEndpoint,
-                items = items,
+                items = eligibleItems,
                 categories = categories,
                 isPro = isPro
             )
+            localResults + cloudResults
         } catch (e: Exception) {
             android.util.Log.e("CloudAiBackendClient", "Gemini batch analysis failed: ${e.message}", e)
             if (e.message?.contains("429") == true) {
                 GeminiRateLimiter.reportRateLimitHit()
             }
             // Fallback independently for each item in the batch
-            items.associate { item ->
+            val fallbackMap = eligibleItems.associate { item ->
                 item.photoId to SmartHeuristicParser.parse(
                     scrubbedText = item.scrubbedText,
                     photoTitle = item.photoTitle,
@@ -334,6 +356,7 @@ object CloudAiBackendClient {
                     visualLabels = item.visualLabels
                 )
             }
+            localResults + fallbackMap
         }
     }
 
@@ -581,11 +604,21 @@ object CloudAiBackendClient {
         val effectiveApiKey = if (apiKey.isNotBlank()) apiKey.trim() else CloudAiConfigManager.HARDCODED_API_KEY.trim()
         if (effectiveApiKey.isBlank()) return@withContext texts.map { null }
 
+        // Defense-in-depth: separate LOCAL_ONLY items from CLOUD_ELIGIBLE while preserving original indices
+        val eligibleIndices = mutableListOf<Int>()
+        for (i in texts.indices) {
+            if (PrivacyPolicy.classify(texts[i]) == PrivacyDecision.CLOUD_ELIGIBLE) {
+                eligibleIndices.add(i)
+            }
+        }
+        if (eligibleIndices.isEmpty()) return@withContext texts.map { null }
+
         val urlString = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:batchEmbedContents?key=$effectiveApiKey"
 
         try {
             val requestsArray = JSONArray()
-            for (text in texts) {
+            for (idx in eligibleIndices) {
+                val text = texts[idx]
                 val cleanText = text.trim().take(2048)
                 val reqObj = JSONObject().apply {
                     put("model", "models/$modelName")
@@ -637,12 +670,11 @@ object CloudAiBackendClient {
             val json = JSONObject(responseText)
             val embeddingsArray = json.optJSONArray("embeddings") ?: return@withContext texts.map { null }
 
-            val resultList = mutableListOf<FloatArray?>()
-            for (i in 0 until texts.size) {
-                val embObj = embeddingsArray.optJSONObject(i)
+            val finalResult = arrayOfNulls<FloatArray>(texts.size).toMutableList()
+            for ((reqOrder, origIdx) in eligibleIndices.withIndex()) {
+                val embObj = embeddingsArray.optJSONObject(reqOrder)
                 val valuesArray = embObj?.optJSONArray("values")
                 if (valuesArray == null || valuesArray.length() == 0) {
-                    resultList.add(null)
                     continue
                 }
 
@@ -658,9 +690,10 @@ object CloudAiBackendClient {
                 if (norm > 0.00001f) {
                     for (k in vector.indices) vector[k] /= norm
                 }
-                resultList.add(vector)
+                finalResult[origIdx] = vector
             }
-            resultList
+
+            finalResult
         } catch (e: Exception) {
             android.util.Log.e("CloudAiBackendClient", "getBatchEmbeddings exception for model $modelName: ${e.message}", e)
             texts.map { null }
@@ -680,6 +713,11 @@ object CloudAiBackendClient {
         val trimmed = text.trim()
         val effectiveApiKey = if (apiKey.isNotBlank()) apiKey.trim() else CloudAiConfigManager.HARDCODED_API_KEY.trim()
         if (trimmed.isBlank() || effectiveApiKey.isBlank()) return@withContext null
+
+        // Privacy Gate Check
+        if (PrivacyPolicy.classify(trimmed) == PrivacyDecision.LOCAL_ONLY) {
+            return@withContext null
+        }
 
         val cleanText = trimmed.take(2048) // Safe input size
         val urlString = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:embedContent?key=$effectiveApiKey"

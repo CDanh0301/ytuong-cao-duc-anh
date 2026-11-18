@@ -1,6 +1,7 @@
 package com.example.test2.ai
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.net.Uri
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.label.ImageLabeling
@@ -112,66 +113,28 @@ object LocalImageLabeler {
     }
 
     /**
+     * Runs ML Kit Image Labeling on a decoded bitmap with rotation.
+     */
+    suspend fun analyze(bitmap: Bitmap, rotationDegrees: Int = 0): VisualAnalysisResult = withContext(Dispatchers.IO) {
+        try {
+            val image = InputImage.fromBitmap(bitmap, rotationDegrees)
+            val labels = processImage(image)
+            classifyLabels(labels)
+        } catch (_: Exception) {
+            VisualAnalysisResult()
+        }
+    }
+
+    /**
      * Runs ML Kit Image Labeling on the photo file asynchronously.
      * Gracefully returns an empty result on any error.
      */
     suspend fun analyze(context: Context, filePath: String): VisualAnalysisResult = withContext(Dispatchers.IO) {
+        val decoded = ImageDecoder.decode(context, filePath) ?: return@withContext VisualAnalysisResult()
         try {
-            val file = File(filePath)
-
-            // 1. Handle on-device encrypted files
-            if (file.exists() && com.example.test2.storage.LocalCryptoManager.isEncrypted(file)) {
-                try {
-                    val bitmap = com.example.test2.storage.LocalCryptoManager.decodeDecryptedBitmapSafely(file, maxDimension = 1920)
-                    if (bitmap != null) {
-                        val image = InputImage.fromBitmap(bitmap, 0)
-                        val labels = processImage(image)
-                        bitmap.recycle()
-                        if (labels.isNotEmpty()) {
-                            return@withContext classifyLabels(labels)
-                        }
-                    }
-                } catch (_: Exception) {
-                }
-            }
-
-            val uri = if (filePath.startsWith("content://")) {
-                Uri.parse(filePath)
-            } else {
-                Uri.fromFile(file)
-            }
-
-            // 2. Try directly via InputImage.fromFilePath
-            val labelsFromUri = try {
-                val image = InputImage.fromFilePath(context, uri)
-                processImage(image)
-            } catch (_: Exception) {
-                emptyList()
-            }
-
-            if (labelsFromUri.isNotEmpty()) {
-                return@withContext classifyLabels(labelsFromUri)
-            }
-
-            // 3. Fallback: Open stream directly and decode Bitmap
-            try {
-                val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
-                    android.graphics.BitmapFactory.decodeStream(stream)
-                }
-                if (bitmap != null) {
-                    val image = InputImage.fromBitmap(bitmap, 0)
-                    val labelsFromBitmap = processImage(image)
-                    bitmap.recycle()
-                    if (labelsFromBitmap.isNotEmpty()) {
-                        return@withContext classifyLabels(labelsFromBitmap)
-                    }
-                }
-            } catch (_: Exception) {
-            }
-
-            classifyLabels(labelsFromUri)
-        } catch (_: Exception) {
-            VisualAnalysisResult()
+            analyze(decoded.bitmap, decoded.rotationDegrees)
+        } finally {
+            decoded.bitmap.recycle()
         }
     }
 

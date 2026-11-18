@@ -17,9 +17,14 @@ import com.example.test2.ai.CloudAiConfigManager
 import com.example.test2.ai.LocalActionCardExtractor
 import com.example.test2.ai.LocalImageLabeler
 import com.example.test2.ai.MlKitOcrEngine
+import com.example.test2.ai.OnDeviceAnalysis
+import com.example.test2.ai.PiiScrubResult
 import com.example.test2.ai.PiiScrubber
+import com.example.test2.ai.PrivacyDecision
+import com.example.test2.ai.PrivacyPolicy
 import com.example.test2.ai.SmartHeuristicParser
 import com.example.test2.ai.VectorSemanticSearchEngine
+import com.example.test2.ai.cards.QualityFlags
 import com.example.test2.database.AppDatabaseHelper
 import com.example.test2.notifications.ScreenshotNotificationHelper
 import com.example.test2.security.PrivacyVaultManager
@@ -63,14 +68,40 @@ class ScreenshotQueueWorker(
         }
     }
 
+    override suspend fun getForegroundInfo(): androidx.work.ForegroundInfo {
+        val notification = ScreenshotNotificationHelper.getProcessingNotification(context)
+        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            androidx.work.ForegroundInfo(
+                ScreenshotNotificationHelper.NOTIFICATION_PROCESSING_ID,
+                notification,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
+        } else {
+            androidx.work.ForegroundInfo(
+                ScreenshotNotificationHelper.NOTIFICATION_PROCESSING_ID,
+                notification
+            )
+        }
+    }
+
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val dbHelper = AppDatabaseHelper.getInstance(context)
+        dbHelper.resetHangingProcessingItems()
 
-        // Process all pending items in batches of 4 items for sweet-spot attention focus and zero 429 errors
-        while (true) {
+        var processedCount = 0
+        val maxItemsPerRun = 20
+
+        while (!isStopped) {
             val batch = dbHelper.claimNextPendingQueueItems(limit = 4)
             if (batch.isEmpty()) break
             processQueueBatch(batch, dbHelper)
+            processedCount += batch.size
+
+            if (QualityFlags.WORKER_HARDENING && processedCount >= maxItemsPerRun) {
+                // Re-enqueue to avoid exceeding OS background execution limits
+                enqueue(context)
+                break
+            }
         }
 
         Result.success()
@@ -170,13 +201,16 @@ class ScreenshotQueueWorker(
                     continue
                 }
 
-                val visualAnalysis = LocalImageLabeler.analyze(context, currentFilePath)
-                // Always read authentic raw OCR text from the image for local card extraction,
-                // ensuring unredacted account numbers and phones remain available for local on-device ActionCard storage.
-                val rawOcrText = MlKitOcrEngine.recognizeText(context, currentFilePath)
+                // Step 2 & 3: Single-pass On-Device Analysis (Decodes once, OCR, QR, Cards, Vision)
+                val onDeviceResult = if (QualityFlags.SHARED_DECODE) {
+                    OnDeviceAnalysis.analyze(context, item.photoId, currentFilePath, title)
+                } else null
+
+                val visualAnalysis = onDeviceResult?.visual ?: LocalImageLabeler.analyze(context, currentFilePath)
+                val rawOcrText = onDeviceResult?.ocr?.flatText ?: MlKitOcrEngine.recognizeText(context, currentFilePath)
 
                 // Extract Smart Action Cards on-device from raw text and QR code before PII scrubbing
-                val actionCards = LocalActionCardExtractor.extractCards(
+                val actionCards = onDeviceResult?.cards ?: LocalActionCardExtractor.extractCards(
                     context = context,
                     filePath = currentFilePath,
                     photoId = item.photoId,
@@ -184,10 +218,10 @@ class ScreenshotQueueWorker(
                     photoTitle = title
                 )
                 if (actionCards.isNotEmpty()) {
-                    dbHelper.saveActionCards(actionCards)
+                    dbHelper.replaceActionCardsForPhoto(item.photoId, actionCards)
                 }
 
-                val piiResult = PiiScrubber.scrub(rawOcrText)
+                val piiResult = onDeviceResult?.let { PiiScrubResult(it.scrubbedText, false) } ?: PiiScrubber.scrub(rawOcrText)
                 val scrubbedText = piiResult.scrubbedText
 
                 dbHelper.updateQueueItemState(
@@ -196,7 +230,15 @@ class ScreenshotQueueWorker(
                     scrubbedText = scrubbedText
                 )
 
-                // Smart Cloud Gatekeeper: Skip 3.5 Flash Lite ONLY for genuinely non-informative photos
+                // Privacy Policy Gate: check if content is strictly LOCAL_ONLY
+                val privacyDecision = PrivacyPolicy.classify(
+                    scrubbedText = scrubbedText,
+                    photoTitle = title,
+                    visualLabels = visualAnalysis.rawLabels
+                )
+                val isCloudAllowed = privacyDecision == PrivacyDecision.CLOUD_ELIGIBLE
+
+                // Smart Cloud Gatekeeper: Skip 3.5 Flash Lite ONLY for genuinely non-informative photos or LOCAL_ONLY
                 // If text is short, but has face, or document/receipt visual labels, or informative title: still allow Cloud AI!
                 val hasInformativeVisual = visualAnalysis.isPerson || visualAnalysis.hasTextOrDoc ||
                         visualAnalysis.rawLabels.any {
@@ -215,7 +257,7 @@ class ScreenshotQueueWorker(
                 val isGenuinelyNonText = (scrubbedText.isBlank() || scrubbedText.trim().length < 4) && !hasInformativeVisual && !hasInformativeTitle
                 val isPureNatureWithoutText = (visualAnalysis.isNature || visualAnalysis.isAnimal) && !visualAnalysis.hasTextOrDoc && scrubbedText.trim().length < 4
 
-                val needsCloud = canUseCloud && !isGenuinelyNonText && !isPureNatureWithoutText
+                val needsCloud = canUseCloud && isCloudAllowed && !isGenuinelyNonText && !isPureNatureWithoutText
                 if (needsCloud) {
                     cloudCandidates.add(
                         BatchPhotoItem(
@@ -339,8 +381,9 @@ class ScreenshotQueueWorker(
                 )
                 dbHelper.savePhotoVector(item.photoId, localEmbedding, parsed.detectedIntent)
 
-                // Enqueue for batch embedding (both text and non-text photos!)
-                if (fullSemanticDoc.isNotBlank()) {
+                // Enqueue for batch embedding ONLY if cloud is allowed for this item
+                val itemPrivacy = PrivacyPolicy.classify(scrubbedText, title, visualAnalysis.rawLabels)
+                if (itemPrivacy == PrivacyDecision.CLOUD_ELIGIBLE && fullSemanticDoc.isNotBlank()) {
                     embeddingTextsToGenerate.add(EmbeddingTarget(item.photoId, fullSemanticDoc))
                 }
 

@@ -1217,6 +1217,35 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
 
     // --- Smart Action Cards Operations (Phase: Smart Information Cards) ---
 
+    fun replaceActionCardsForPhoto(photoId: String, cards: List<ActionCard>) {
+        try {
+            val db = writableDatabase
+            db.beginTransaction()
+            try {
+                db.delete(TABLE_ACTION_CARDS, "photo_id = ?", arrayOf(photoId))
+                val baseTime = System.currentTimeMillis()
+                for ((index, card) in cards.withIndex()) {
+                    val createdAt = if (card.createdAt > 0L) card.createdAt else baseTime + index
+                    val values = ContentValues().apply {
+                        put("id", card.id)
+                        put("photo_id", photoId)
+                        put("type", card.type.name)
+                        put("title", card.title)
+                        put("subtitle", card.subtitle)
+                        put("payload_json", card.payloadJson)
+                        put("created_at", createdAt)
+                    }
+                    db.insertWithOnConflict(TABLE_ACTION_CARDS, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+                }
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
+            }
+        } catch (e: Exception) {
+            logDebugError("Failed to replace action cards for photo $photoId", e)
+        }
+    }
+
     fun saveActionCards(cards: List<ActionCard>) {
         if (cards.isEmpty()) return
         try {

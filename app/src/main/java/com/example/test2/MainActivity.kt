@@ -482,6 +482,9 @@ class MainActivity : FragmentActivity() {
                         },
                         onGetActionCards = { pId ->
                             viewModel.getActionCardsForPhoto(pId)
+                        },
+                        onObserveActionCards = { pId ->
+                            viewModel.observeActionCards(pId)
                         }
                     )
                 }

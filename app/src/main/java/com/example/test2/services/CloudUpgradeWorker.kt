@@ -63,6 +63,18 @@ class CloudUpgradeWorker(
                 val scrubbedText = item.scrubbedText ?: ""
 
                 val visualAnalysis = LocalImageLabeler.analyze(context, item.filePath)
+
+                // Privacy Gate: skip items containing sensitive documents or credentials
+                if (com.example.test2.ai.PrivacyPolicy.classify(scrubbedText, title, visualAnalysis.rawLabels) == com.example.test2.ai.PrivacyDecision.LOCAL_ONLY) {
+                    dbHelper.updateQueueItemState(
+                        photoId = item.photoId,
+                        status = "COMPLETED",
+                        scrubbedText = scrubbedText,
+                        needsCloudUpgrade = false
+                    )
+                    continue
+                }
+
                 val parsed = CloudAiBackendClient.analyzeWithFallback(
                     context = context,
                     scrubbedText = scrubbedText,

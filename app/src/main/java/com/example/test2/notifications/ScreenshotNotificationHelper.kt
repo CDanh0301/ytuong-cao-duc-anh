@@ -202,6 +202,20 @@ object ScreenshotNotificationHelper {
         }
     }
 
+    const val CHANNEL_PROCESSING_ID = "screenshot_processing_channel"
+    const val NOTIFICATION_PROCESSING_ID = 1003
+
+    fun getProcessingNotification(context: Context): android.app.Notification {
+        createNotificationChannel(context)
+        return NotificationCompat.Builder(context, CHANNEL_ID)
+            .setContentTitle("Đang xử lý ảnh")
+            .setContentText("Hệ thống đang phân tích ảnh...")
+            .setSmallIcon(android.R.drawable.ic_menu_rotate)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+    }
+
     private fun formatFileSize(bytes: Long): String {
         if (bytes <= 0L) return "0 KB"
         val kb = bytes / 1024.0

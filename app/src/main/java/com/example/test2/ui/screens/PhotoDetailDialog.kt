@@ -40,6 +40,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
@@ -313,7 +315,8 @@ fun ImageViewerDialog(
     onOpenSettings: (Photo) -> Unit,
     onToggleFavorite: (Photo) -> Unit,
     onAddToCalendar: (Photo) -> Unit,
-    onGetActionCards: ((String) -> List<ActionCard>)? = null
+    onGetActionCards: ((String) -> List<ActionCard>)? = null,
+    onObserveActionCards: ((String) -> kotlinx.coroutines.flow.Flow<List<ActionCard>>)? = null
 ) {
     if (photos.isEmpty()) return
 
@@ -342,8 +345,12 @@ fun ImageViewerDialog(
     val currentFolder = folders.find { it.id == currentPhoto.folderId }
     val photoCategories = categories.filter { it.id in currentPhoto.categoryIds }
 
-    val actionCards = remember(currentPhoto.id) {
-        onGetActionCards?.invoke(currentPhoto.id) ?: emptyList()
+    val actionCards by if (onObserveActionCards != null) {
+        onObserveActionCards(currentPhoto.id).collectAsState(initial = emptyList<ActionCard>())
+    } else {
+        remember(currentPhoto.id) {
+            mutableStateOf(onGetActionCards?.invoke(currentPhoto.id) ?: emptyList<ActionCard>())
+        }
     }
     var qrPreviewCard by remember { mutableStateOf<ActionCard?>(null) }
 
@@ -1188,18 +1195,19 @@ fun SmartActionCardBar(
                             onClick = { ActionCardIntentHelper.dialPhoneNumber(context, phone) }
                         )
                         OneTapActionButton(
-                            label = "Nhắn Zalo",
-                            icon = Icons.AutoMirrored.Filled.Chat,
-                            backgroundColor = Color(0xFF2563EB),
-                            onClick = { ActionCardIntentHelper.openZalo(context, phone) }
+                            label = "Sao chép",
+                            icon = Icons.Default.ContentCopy,
+                            backgroundColor = Color.White.copy(alpha = 0.22f),
+                            onClick = { ActionCardIntentHelper.copyToClipboard(context, "Số điện thoại", phone, "Đã sao chép số: $phone") }
+                        )
+                    } else {
+                        OneTapActionButton(
+                            label = "Lưu danh bạ",
+                            icon = Icons.Default.PersonAdd,
+                            backgroundColor = Color.White.copy(alpha = 0.22f),
+                            onClick = { ActionCardIntentHelper.insertContact(context, name, phone, email, company) }
                         )
                     }
-                    OneTapActionButton(
-                        label = "Lưu danh bạ",
-                        icon = Icons.Default.PersonAdd,
-                        backgroundColor = Color.White.copy(alpha = 0.22f),
-                        onClick = { ActionCardIntentHelper.insertContact(context, name, phone, email, company) }
-                    )
                 }
 
                 ActionCardType.EVENT -> {
