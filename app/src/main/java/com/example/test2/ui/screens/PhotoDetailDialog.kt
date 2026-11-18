@@ -3,6 +3,8 @@ package com.example.test2.ui.screens
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,6 +28,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -51,11 +54,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Label
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
@@ -318,6 +324,7 @@ fun ImageViewerDialog(
     val pagerState = rememberPagerState(initialPage = initialIndex) { photos.size }
     var showControls by remember { mutableStateOf(true) }
     var isCurrentPhotoZoomed by remember { mutableStateOf(false) }
+    var isActionDrawerExpanded by remember { mutableStateOf(false) }
 
     val dismissOffsetY = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
@@ -327,6 +334,7 @@ fun ImageViewerDialog(
     LaunchedEffect(pagerState.currentPage) {
         isCurrentPhotoZoomed = false
         dismissOffsetY.snapTo(0f)
+        isActionDrawerExpanded = false
     }
 
     val currentPhoto = photos.getOrNull(pagerState.currentPage) ?: photos.first()
@@ -361,7 +369,7 @@ fun ImageViewerDialog(
             // Horizontal Pager for swiping between photos (swipe disabled when zoomed in or when dismissing)
             HorizontalPager(
                 state = pagerState,
-                userScrollEnabled = !isCurrentPhotoZoomed && dismissOffsetY.value == 0f,
+                userScrollEnabled = !isCurrentPhotoZoomed && dismissOffsetY.value == 0f && !isActionDrawerExpanded,
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
@@ -512,9 +520,19 @@ fun ImageViewerDialog(
                 }
             }
 
-            // Bottom overlay bar with Smart Action Cards & clean folder info (Zero Clutter)
+            // Dimmed Scrim when Action Drawer is expanded (tapping outside collapses drawer)
+            if (isActionDrawerExpanded) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.50f))
+                        .clickable { isActionDrawerExpanded = false }
+                )
+            }
+
+            // Bottom overlay bar with Smart Action Cards Peek Pill & clean folder info (Zero Clutter)
             AnimatedVisibility(
-                visible = showControls && dismissOffsetY.value < 50f,
+                visible = showControls && dismissOffsetY.value < 50f && !isActionDrawerExpanded,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier.align(Alignment.BottomCenter)
@@ -525,15 +543,63 @@ fun ImageViewerDialog(
                         .background(Color.Black.copy(alpha = 0.70f))
                         .padding(horizontal = 16.dp, vertical = 14.dp)
                 ) {
-                    // Smart Action Cards (Clean Action Pill Strip)
+                    // Action Cards Peek Pill (Tiny 42dp strip - Tap or Swipe Up to expand)
                     if (actionCards.isNotEmpty()) {
-                        actionCards.forEach { card ->
-                            SmartActionCardBar(
-                                card = card,
-                                onOpenQr = { qrPreviewCard = card }
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color(0xFF1E293B).copy(alpha = 0.92f))
+                                .border(1.dp, Color(0xFF3B82F6).copy(alpha = 0.40f), RoundedCornerShape(14.dp))
+                                .clickable { isActionDrawerExpanded = true }
+                                .pointerInput(Unit) {
+                                    detectVerticalDragGestures { _, dragAmount ->
+                                        if (dragAmount < -10f) {
+                                            isActionDrawerExpanded = true
+                                        }
+                                    }
+                                }
+                                .padding(horizontal = 14.dp, vertical = 9.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        Icons.Default.AutoAwesome,
+                                        contentDescription = null,
+                                        tint = Color(0xFFFBBF24),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    val summaryText = if (actionCards.size == 1) {
+                                        actionCards.first().title
+                                    } else {
+                                        "${actionCards.size} thông tin hành động • Chạm hoặc vuốt lên"
+                                    }
+                                    Text(
+                                        text = summaryText,
+                                        fontSize = 12.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Icon(
+                                    Icons.Default.KeyboardArrowUp,
+                                    contentDescription = "Mở rộng",
+                                    tint = Color(0xFF94A3B8),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
+                        Spacer(modifier = Modifier.height(10.dp))
                     }
 
                     Row(
@@ -621,6 +687,111 @@ fun ImageViewerDialog(
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+
+            // Expanded Action Cards Drawer (Zero Clutter - slides up when requested)
+            AnimatedVisibility(
+                visible = isActionDrawerExpanded && actionCards.isNotEmpty(),
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                modifier = Modifier.align(Alignment.BottomCenter)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+                        .background(Color(0xFF0F172A).copy(alpha = 0.98f))
+                        .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+                        .pointerInput(Unit) {
+                            detectVerticalDragGestures { _, dragAmount ->
+                                if (dragAmount > 20f) {
+                                    isActionDrawerExpanded = false
+                                }
+                            }
+                        }
+                        .padding(horizontal = 16.dp, vertical = 14.dp)
+                ) {
+                    // Drag handle
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp, 4.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.35f))
+                            .align(Alignment.CenterHorizontally)
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Header row: Title & Collapse Button
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = Color(0xFFFBBF24),
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Text(
+                                text = "Thông tin & Hành động 1 chạm (${actionCards.size})",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+
+                        // Collapse Button
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color.White.copy(alpha = 0.15f))
+                                .clickable { isActionDrawerExpanded = false }
+                                .padding(horizontal = 10.dp, vertical = 5.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.KeyboardArrowDown,
+                                    contentDescription = "Thu gọn",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Thu gọn",
+                                    fontSize = 11.5.sp,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Scrollable Action Cards List
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 380.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        actionCards.forEach { card ->
+                            SmartActionCardBar(
+                                card = card,
+                                onOpenQr = { qrPreviewCard = card }
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
                         }
                     }
                 }

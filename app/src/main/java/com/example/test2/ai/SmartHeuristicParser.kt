@@ -1107,7 +1107,7 @@ object SmartHeuristicParser {
         return extractSmartTitle(text, fallback, "OTHER")
     }
 
-    private fun extractDateTime(text: String): Long? {
+    fun extractDateTime(text: String): Long? {
         val lower = text.lowercase(Locale.getDefault())
         val unaccented = VietnameseUtils.removeDiacritics(lower)
         val targetCalendar = Calendar.getInstance()

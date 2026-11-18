@@ -12,11 +12,16 @@ object PiiScrubber {
     // Regex for emails (Phase 5)
     private val EMAIL_REGEX = Regex("(?i)\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b")
 
-    // Regex for Vietnamese bank accounts (Phase 5: 8-16 digits following banking account keywords)
-    private val BANK_ACCOUNT_REGEX = Regex("(?i)\\b(stk|số\\s*tk|so\\s*tk|tài\\s*khoản(?:\\s*ngân\\s*hàng)?|tai\\s*khoan|account(?:\\s*no\\.?|\\s*number)?|acct)\\s*[:=]?\\s*([0-9]{8,16})\\b")
+    // Regex for Vietnamese bank accounts (Phase 5: 8-19 digits with optional spaces/dashes/dots following banking account keywords)
+    private val BANK_ACCOUNT_REGEX = Regex("(?i)\\b(stk|số\\s*tk|so\\s*tk|tài\\s*khoản(?:\\s*thụ\\s*hưởng|\\s*nhận|\\s*ngân\\s*hàng)?|tai\\s*khoan|account(?:\\s*no\\.?|\\s*number)?|acct|tk\\s*thụ\\s*hưởng|tk\\s*nhận)\\s*[:=]?\\s*([0-9][0-9 .\\-]{6,22}[0-9])")
 
-    // Regex for Vietnamese phone numbers (03/05/07/08/09 or +84)
-    private val VN_PHONE_REGEX = Regex("(?<!\\d)(?:(?:\\+84|0)(?:3[2-9]|5[25689]|7[06-9]|8[1-9]|9[0-9]))[\\s.-]?\\d{3}[\\s.-]?\\d{4}(?!\\d)")
+    // Regex for Vietnamese phone numbers (4-3-3, 3-3-4, continuous, landlines)
+    private val VN_PHONE_REGEXES = listOf(
+        Regex("""(?<!\d)(?:(?:\+84|0)(?:3[2-9]|5[25689]|7[06-9]|8[1-9]|9[0-9]))\d[\s.-]\d{3}[\s.-]\d{3}(?!\d)"""),
+        Regex("""(?<!\d)(?:(?:\+84|0)(?:3[2-9]|5[25689]|7[06-9]|8[1-9]|9[0-9]))[\s.-]?\d{3}[\s.-]?\d{4}(?!\d)"""),
+        Regex("""(?<!\d)(?:(?:\+84|0)(?:3[2-9]|5[25689]|7[06-9]|8[1-9]|9[0-9]))\d{7}(?!\d)"""),
+        Regex("""(?<!\d)02[48][\s.-]?\d{4}[\s.-]?\d{4}(?!\d)""")
+    )
 
     // General international phone numbers fallback
     private val PHONE_REGEX = Regex("(?<!\\d)(?:\\+?\\d{1,3}[-.\\s]?)?\\(?\\d{3}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}(?!\\d)")
@@ -33,7 +38,22 @@ object PiiScrubber {
         var result = rawText
         var redacted = false
 
-        // 1. Redact credit card numbers
+        // 1. Redact Bank Account numbers (prefixed with STK, tài khoản...)
+        if (BANK_ACCOUNT_REGEX.containsMatchIn(result)) {
+            result = BANK_ACCOUNT_REGEX.replace(result) { match ->
+                val label = match.groupValues[1]
+                val rawDigits = match.groupValues[2].filter { it.isDigit() }
+                if (rawDigits.length in 8..19) {
+                    redacted = true
+                    val last4 = rawDigits.takeLast(4)
+                    "$label: STK_****$last4"
+                } else {
+                    match.value
+                }
+            }
+        }
+
+        // 1b. Redact credit card numbers (13-16 digits)
         if (CREDIT_CARD_REGEX.containsMatchIn(result)) {
             result = CREDIT_CARD_REGEX.replace(result) { match ->
                 val digits = match.value.filter { it.isDigit() }
@@ -47,22 +67,11 @@ object PiiScrubber {
             }
         }
 
-        // 1b. Redact Emails (Phase 5)
+        // 1c. Redact Emails (Phase 5)
         if (EMAIL_REGEX.containsMatchIn(result)) {
             result = EMAIL_REGEX.replace(result) {
                 redacted = true
                 "[EMAIL_REDACTED]"
-            }
-        }
-
-        // 1c. Redact Bank Account numbers (Phase 5)
-        if (BANK_ACCOUNT_REGEX.containsMatchIn(result)) {
-            result = BANK_ACCOUNT_REGEX.replace(result) { match ->
-                redacted = true
-                val label = match.groupValues[1]
-                val acc = match.groupValues[2]
-                val last4 = if (acc.length >= 4) acc.takeLast(4) else acc
-                "$label: STK_****$last4"
             }
         }
 
@@ -75,14 +84,19 @@ object PiiScrubber {
         }
 
         // 3. Redact Phone numbers (Vietnamese specific and international)
-        if (VN_PHONE_REGEX.containsMatchIn(result)) {
-            result = VN_PHONE_REGEX.replace(result) { match ->
-                redacted = true
-                val digits = match.value.filter { it.isDigit() }
-                val suffix = digits.takeLast(3)
-                "***-***-$suffix"
+        var vnPhoneMatched = false
+        for (vnRegex in VN_PHONE_REGEXES) {
+            if (vnRegex.containsMatchIn(result)) {
+                vnPhoneMatched = true
+                result = vnRegex.replace(result) { match ->
+                    redacted = true
+                    val digits = match.value.filter { it.isDigit() }
+                    val suffix = digits.takeLast(3)
+                    "***-***-$suffix"
+                }
             }
-        } else if (PHONE_REGEX.containsMatchIn(result)) {
+        }
+        if (!vnPhoneMatched && PHONE_REGEX.containsMatchIn(result)) {
             result = PHONE_REGEX.replace(result) { match ->
                 redacted = true
                 val digits = match.value.filter { it.isDigit() }

@@ -166,11 +166,9 @@ class ScreenshotQueueWorker(
                 }
 
                 val visualAnalysis = LocalImageLabeler.analyze(context, currentFilePath)
-                val rawOcrText = if (!item.scrubbedText.isNullOrBlank()) {
-                    item.scrubbedText
-                } else {
-                    MlKitOcrEngine.recognizeText(context, currentFilePath)
-                }
+                // Always read authentic raw OCR text from the image for local card extraction,
+                // ensuring unredacted account numbers and phones remain available for local on-device ActionCard storage.
+                val rawOcrText = MlKitOcrEngine.recognizeText(context, currentFilePath)
 
                 // Extract Smart Action Cards on-device from raw text and QR code before PII scrubbing
                 val actionCards = LocalActionCardExtractor.extractCards(
