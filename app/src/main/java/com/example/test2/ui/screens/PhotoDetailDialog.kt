@@ -63,6 +63,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
+import com.example.test2.database.DefaultCategories
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -648,8 +649,8 @@ fun ImageViewerDialog(
 
                         // Fallback Calendar Action Button if no Event Action Card
                         if (actionCards.none { it.type == ActionCardType.EVENT }) {
-                            val isShopping = currentPhoto.detectedIntent == "SHOPPING" || currentPhoto.categoryIds.contains("cat_tobuy")
-                            val isEvent = currentPhoto.detectedIntent == "EVENT" || currentPhoto.categoryIds.contains("cat_events") || currentPhoto.suggestedEventDateMillis != null
+                            val isShopping = currentPhoto.detectedIntent == "SHOPPING" || currentPhoto.categoryIds.contains(DefaultCategories.TO_BUY)
+                            val isEvent = currentPhoto.detectedIntent == "EVENT" || currentPhoto.categoryIds.contains(DefaultCategories.EVENTS) || currentPhoto.suggestedEventDateMillis != null
                             val hasScheduleOrShopping = isShopping || isEvent
                             if (hasScheduleOrShopping) {
                                 val buttonText = if (currentPhoto.hasReminderCreated) {

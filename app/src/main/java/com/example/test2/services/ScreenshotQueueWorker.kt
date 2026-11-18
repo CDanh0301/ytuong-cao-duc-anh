@@ -30,6 +30,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
+private data class EmbeddingTarget(
+    val photoId: String,
+    val semanticText: String
+)
+
 /**
  * Phase 1: Robust Background Queue Worker powered by WorkManager.
  * Drains the SQLite queue atomically: PENDING -> OCR_DONE -> CLOUD_DONE -> EMBEDDED -> COMPLETED.
@@ -241,7 +246,7 @@ class ScreenshotQueueWorker(
             }
 
             // Prepare lists for storing structured metadata and batch neural vectors
-            val embeddingTextsToGenerate = mutableListOf<Pair<String, String>>() // Pair(photoId, fullSemanticDoc)
+            val embeddingTextsToGenerate = mutableListOf<EmbeddingTarget>()
             var hasCloudUpgradePending = false
 
             for (prep in preprocessed) {
@@ -336,7 +341,7 @@ class ScreenshotQueueWorker(
 
                 // Enqueue for batch embedding (both text and non-text photos!)
                 if (fullSemanticDoc.isNotBlank()) {
-                    embeddingTextsToGenerate.add(Pair(item.photoId, fullSemanticDoc))
+                    embeddingTextsToGenerate.add(EmbeddingTarget(item.photoId, fullSemanticDoc))
                 }
 
                 // Push notifications ONLY for genuine EVENT or SHOPPING and ONLY if this was a live capture
@@ -361,7 +366,7 @@ class ScreenshotQueueWorker(
             // Step 4: Batch Neural Vector Embeddings (1 HTTP call for the entire batch!)
             if (canUseCloud && embeddingTextsToGenerate.isNotEmpty()) {
                 try {
-                    val texts = embeddingTextsToGenerate.map { it.second }
+                    val texts = embeddingTextsToGenerate.map { it.semanticText }
                     val vectors = CloudAiBackendClient.getBatchEmbeddings(
                         texts = texts,
                         apiKey = aiConfig.apiKey,
@@ -373,7 +378,7 @@ class ScreenshotQueueWorker(
                     for (i in vectors.indices) {
                         val vec = vectors.getOrNull(i)
                         if (vec != null) {
-                            val photoId = embeddingTextsToGenerate[i].first
+                            val photoId = embeddingTextsToGenerate[i].photoId
                             vectorsToSave[photoId] = vec
                         }
                     }

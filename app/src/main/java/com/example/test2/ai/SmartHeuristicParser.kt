@@ -2,6 +2,7 @@ package com.example.test2.ai
 
 import android.content.Intent
 import android.provider.CalendarContract
+import com.example.test2.database.DefaultCategories
 import com.example.test2.shared.models.Category
 import com.example.test2.shared.models.Photo
 import com.example.test2.shared.utils.VietnameseUtils
@@ -56,145 +57,23 @@ object SmartHeuristicParser {
         }
     }
 
-    val DEFAULT_CATEGORY_IDS = setOf(
-        "cat_events", "cat_tobuy", "cat_reading", "cat_nature", "cat_personal"
-    )
+    val DEFAULT_CATEGORY_IDS = com.example.test2.database.DefaultCategories.ALL_IDS
 
     val DEFAULT_CATEGORIES = listOf(
-        Category(id = "cat_events", name = "Lịch & Sự kiện", colorHex = "#3B82F6", iconName = "plane", createdAt = 1000L),
-        Category(id = "cat_tobuy", name = "Cần mua & Chi tiêu", colorHex = "#F59E0B", iconName = "utensils", createdAt = 2000L),
-        Category(id = "cat_reading", name = "Đọc & Tham khảo", colorHex = "#8B5CF6", iconName = "tag", createdAt = 3000L),
-        Category(id = "cat_nature", name = "Thiên nhiên & Phong cảnh", colorHex = "#009688", iconName = "leaf", createdAt = 4000L),
-        Category(id = "cat_personal", name = "Cá nhân & Giấy tờ", colorHex = "#EC4899", iconName = "user", createdAt = 5000L)
+        Category(id = com.example.test2.database.DefaultCategories.EVENTS, name = "Lịch & Sự kiện", colorHex = "#3B82F6", iconName = "plane", createdAt = 1000L),
+        Category(id = com.example.test2.database.DefaultCategories.TO_BUY, name = "Cần mua & Chi tiêu", colorHex = "#F59E0B", iconName = "utensils", createdAt = 2000L),
+        Category(id = com.example.test2.database.DefaultCategories.READING, name = "Đọc & Tham khảo", colorHex = "#8B5CF6", iconName = "tag", createdAt = 3000L),
+        Category(id = com.example.test2.database.DefaultCategories.NATURE, name = "Thiên nhiên & Phong cảnh", colorHex = "#009688", iconName = "leaf", createdAt = 4000L),
+        Category(id = com.example.test2.database.DefaultCategories.PERSONAL, name = "Cá nhân & Giấy tờ", colorHex = "#EC4899", iconName = "user", createdAt = 5000L)
     )
 
-    // Strict action keywords required to qualify as an EVENT or Schedule
-    private val EVENT_ACTION_KEYWORDS = listOf(
-        // Multi-word schedule & timetable phrases
-        "lịch khám", "lich kham", "lịch làm việc", "lich lam viec",
-        "giờ nhận bệnh", "gio nhan benh", "giờ khám", "gio kham", "giờ khám bệnh", "gio kham benh",
-        "lịch trực", "lich truc", "thời khóa biểu", "thoi khoa bieu",
-        "lịch hoạt động", "lich hoat dong", "lịch chiếu", "lich chieu",
-        "chuyến bay", "chuyen bay", "boarding pass", "vé bay", "ve bay",
-        "vé xem phim", "ve xem phim", "lịch hẹn", "lich hen", "lịch họp", "lich hop",
-        "doctor appointment", "meeting schedule", "conference call", "sinh nhật", "sinh nhat",
-        "hội thảo", "hoi thao", "khám bệnh", "kham benh", "đặt chỗ", "dat cho",
-        // Standalone whole words
-        "meeting", "họp", "hop", "zoom", "calendar", "schedule", "appointment",
-        "lịch", "flight", "ticket", "webinar", "party", "showtime", "booking", "reservation"
-    )
-
-    // Identity Document official legal headers & titles
-    val IDENTITY_DOC_SIGNATURES = listOf(
-        "cộng hòa xã hội chủ nghĩa việt nam", "cong hoa xa hoi chu nghia viet nam",
-        "độc lập tự do hạnh phúc", "doc lap tu do hanh phuc",
-        "căn cước công dân", "can cuoc cong dan", "căn cước", "can cuoc", "cccd", "cmnd",
-        "chứng minh nhân dân", "chung minh nhan dan", "chứng minh thư", "chung minh thu",
-        "giấy phép lái xe", "giay phep lai xe", "gplx", "bằng lái xe", "bang lai xe",
-        "hộ chiếu", "ho chieu", "passport", "sổ hộ khẩu", "so ho khau",
-        "giấy khai sinh", "giay khai sinh", "thẻ căn cước", "the can cuoc",
-        "thẻ sinh viên", "the sinh vien", "thẻ nhân viên", "the nhan vien",
-        "thẻ bảo hiểm y tế", "the bao hiem y te",
-        "identity card", "id card", "driver license", "driving license", "driver's license", "national id"
-    )
-
-    // Personal & People: Portraits, selfies, personal IDs, CCCD, family, profiles, bio/wiki photos
-    // CRITICAL: Standalone words like "họ tên", "bhyt", "người" MUST NOT trigger on their own without identity document context!
-    private val PERSONAL_KEYWORDS = listOf(
-        // Vietnamese phrases & IDs
-        "chân dung", "chan dung", "ảnh chân dung", "anh chan dung",
-        "tự sướng", "tu suong", "ảnh tự sướng", "anh tu suong",
-        "cá nhân", "ca nhan", "trang cá nhân", "trang ca nhan", "hồ sơ cá nhân", "ho so ca nhan",
-        "căn cước công dân", "can cuoc cong dan", "cccd", "cmnd",
-        "chứng minh nhân dân", "chung minh nhan dan",
-        "hộ chiếu", "ho chieu", "passport", "bằng lái xe", "bang lai xe",
-        "giấy phép lái xe", "giay phep lai xe", "gplx", "thẻ sinh viên", "the sinh vien",
-        "thẻ nhân viên", "the nhan vien", "thẻ bảo hiểm y tế", "the bao hiem y te",
-        "ảnh gia đình", "anh gia dinh", "ảnh đại diện", "anh dai dien", "ảnh bạn bè",
-        // English keywords
-        "portrait", "portraits", "selfie", "selfies", "headshot",
-        "identity card", "id card", "driver license", "driving license", "driver's license", "national id",
-        "student id", "employee id", "family photo", "family portrait",
-        "profile photo", "profile picture", "avatar", "resume", "curriculum vitae", "user profile", "my profile",
-        // Domains and social profile cues
-        "wikimedia", "wikipedia", "facebook", "instagram", "linkedin", "threads"
-    )
-
-    // Nature & Scenery: Landscapes, mountains, forests, outdoors, scenic photo sources
-    // CRITICAL: Standalone word "nature" alone does NOT qualify without scenic context!
-    // Ambiguous 2-3 letter unaccented tokens like 'ho', 'song', 'doi', 'bien', 'cay' are STRICTLY forbidden!
-    private val NATURE_KEYWORDS = listOf(
-        // Specific compound phrases
-        "thiên nhiên", "thien nhien", "cảnh thiên nhiên", "canh thien nhien",
-        "phong cảnh", "phong canh", "cảnh đẹp", "canh dep",
-        "đỉnh núi", "dinh nui", "đồi núi", "doi nui", "dãy núi", "day nui",
-        "thác nước", "thac nuoc", "bãi biển", "bai bien", "bờ biển", "bo bien",
-        "dã ngoại", "da ngoai", "leo núi", "leo nui", "rừng rậm", "rung ram",
-        "thung lũng", "thung lung", "rừng cây", "rung cay", "cây cối", "cay coi",
-        "mùa thu", "mua thu", "lá vàng", "la vang", "hoàng hôn", "hoang hon", "bình minh", "binh minh",
-        "nature landscape", "nature scenery", "outdoor nature", "scenic view",
-        "golden trees", "golden forest", "autumn forest",
-        // Exact whole words (safe token matching via tokens.contains)
-        "núi", "mountain", "mountains", "landscape", "landscapes", "scenery", "scenic",
-        "waterfall", "waterfalls", "forest", "forests", "rừng", "trekking", "hiking",
-        "hoang dã", "wilderness",
-        "autumn", "golden", "leaves", "foliage",
-        "lake", "lakes", "river", "rivers", "suối",
-        "beach", "beaches", "valley", "valleys",
-        // Scenery & Wallpaper portals
-        "nationalgeographic", "natgeo", "geographic", "geography",
-        "pexels", "unsplash", "pixabay", "wallpaper", "wallpapers"
-    )
-
-    // Product keywords with explicit compound phrases to avoid false positive collisions
-    // CRITICAL: Bare single words like "bình" (colliding with street "Trần Bình") or "noi" (colliding with "Hà Nội" / "Phòng khám Nội")
-    // are strictly replaced with specific compound merchandise phrases!
-    private val PRODUCT_KEYWORDS = listOf(
-        "sản phẩm", "san pham", "mặt hàng", "mat hang", "hàng hóa", "hang hoa",
-        "cốc sứ", "coc su", "ly nước", "ly nuoc", "bình nước", "binh nuoc", "tách trà", "tach tra",
-        "bình giữ nhiệt", "binh giu nhiet", "bình hoa", "bình đun", "bình nóng lạnh", "bình gas", "bình thủy",
-        "product", "products", "item", "items", "merchandise", "goods", "cup", "cups",
-        "mug", "mugs", "tumbler", "drinkware", "thermos",
-        "thiết bị", "thiet bi", "dụng cụ", "dung cu",
-        "nồi cơm", "noi com", "nồi chiên", "noi chien", "nồi áp suất", "noi ap suat",
-        "nồi lẩu", "noi lau", "nồi inox", "noi inox", "nồi đất", "chảo chống dính", "chao chong dinh",
-        "chảo", "chao", "tivi", "tv", "bravia", "sony",
-        "máy ảnh", "may anh", "camera", "canon", "nikon", "sony alpha", "fujifilm", "ống kính", "ong kinh", "lens", "eos",
-        "tai nghe", "bàn phím", "chuột máy tính", "laptop", "máy giặt", "tủ lạnh",
-        "quần áo", "giày dép", "balo", "túi xách", "trang trí", "diy"
-    )
-
-    private val SHOPPING_KEYWORDS = listOf(
-        "tổng cộng", "tong cong", "đơn hàng", "don hang", "hóa đơn", "hoa don",
-        "thanh toán", "thanh toan", "giỏ hàng", "gio hang", "chi phí", "chi phi",
-        "chuyển khoản", "chuyen khoan", "total", "subtotal", "price", "order",
-        "shopee", "lazada", "tiki", "amazon", "sendo", "dienmayxanh", "dientumienbac", "nguyenkim", "cellphones", "fptshop", "thegioididong",
-        "receipt", "invoice", "₫", "$", "vnd", "paid", "cart",
-        "còn hàng", "con hang", "hết hàng", "het hang", "mua ngay", "thêm vào giỏ", "them vao gio",
-        "phí vận chuyển", "phi van chuyen", "vận chuyển", "van chuyen",
-        "khuyến mãi", "khuyen mai", "ưu đãi", "uu dai", "bảo hành", "bao hanh",
-        "mã sản phẩm", "ma san pham", "thương hiệu", "thuong hieu", "xuất xứ", "xuat xu",
-        "vat", "số lượng", "so luong", "mức giá", "muc gia", "freeship"
-    )
-
-    private val READING_KEYWORDS = listOf(
-        // Journalism & Editorial phrases
-        "bài viết", "bai viet", "tác giả", "tac gia", "trích dẫn", "trich dan",
-        "tin tức", "tin tuc", "bài báo", "bai bao", "báo chí", "bao chi", "phóng sự", "phong su",
-        "thời sự", "thoi su", "tin mới", "tin moi", "tin nóng", "tin nong", "điểm tin", "diem tin",
-        "thông tin điện tử", "thong tin dien tu", "báo điện tử", "bao dien tu",
-        "tạp chí", "tap chi", "toà soạn", "toa soan", "phóng viên", "phong vien", "nhà báo", "nha bao",
-        "chuyên mục", "chuyen muc", "đọc tiếp", "doc tiep", "bản tin", "ban tin",
-        "dự báo thời tiết", "du bao thoi tiet",
-        "ùn tắc", "un tac", "kẹt xe", "ket xe", "giao thông giờ cao điểm",
-        "mưa lớn sáng", "mưa lạnh", "mua lanh", "triều cường", "trieu cuong",
-        "kinh tế xã hội", "thế giới", "the gioi", "pháp luật", "phap luat",
-        "ngoại hạng anh", "ngoai hang anh",
-        "đọc sách", "doc sach", "cuốn sách", "cuon sach", "trang sách", "quyen sach", "quyển sách",
-        // English phrases & distinct single tokens
-        "article", "author", "chapter 1", "chapter 2", "reading", "blog", "medium.com",
-        "substack", "news", "editorial", "newsletter"
-    )
+    private val EVENT_ACTION_KEYWORDS get() = HeuristicKeywords.EVENT_ACTION_KEYWORDS
+    val IDENTITY_DOC_SIGNATURES get() = HeuristicKeywords.IDENTITY_DOC_SIGNATURES
+    private val PERSONAL_KEYWORDS get() = HeuristicKeywords.PERSONAL_KEYWORDS
+    private val NATURE_KEYWORDS get() = HeuristicKeywords.NATURE_KEYWORDS
+    private val PRODUCT_KEYWORDS get() = HeuristicKeywords.PRODUCT_KEYWORDS
+    private val SHOPPING_KEYWORDS get() = HeuristicKeywords.SHOPPING_KEYWORDS
+    private val READING_KEYWORDS get() = HeuristicKeywords.READING_KEYWORDS
 
     private fun tokenize(text: String): Set<String> {
         return text.split(Regex("[^\\p{L}\\p{Nd}]+"))
@@ -226,13 +105,27 @@ object SmartHeuristicParser {
         return count
     }
 
-    fun isNewsOrReadingContent(photoTitle: String, text: String): Boolean {
+    internal data class ParsedContext(
+        val lowerText: String,
+        val lowerTitle: String,
+        val combined: String,
+        val unaccentedCombined: String,
+        val tokens: Set<String>,
+        val unaccentedTokens: Set<String>
+    )
+
+    internal fun buildParsedContext(photoTitle: String, text: String): ParsedContext {
         val lowerText = text.lowercase(Locale.getDefault())
         val lowerTitle = photoTitle.lowercase(Locale.getDefault())
         val combined = "$lowerTitle $lowerText"
         val unaccentedCombined = VietnameseUtils.removeDiacritics(combined)
         val tokens = tokenize(combined)
         val unaccentedTokens = tokenize(unaccentedCombined)
+        return ParsedContext(lowerText, lowerTitle, combined, unaccentedCombined, tokens, unaccentedTokens)
+    }
+
+    fun isNewsOrReadingContent(photoTitle: String, text: String): Boolean {
+        val ctx = buildParsedContext(photoTitle, text)
 
         // 1. Unambiguous news publishing legal & editorial signatures
         val newsEditorialSignatures = listOf(
@@ -241,7 +134,7 @@ object SmartHeuristicParser {
             "giay phep xuat ban", "giay phep so", "co quan chu quan",
             "su kien: thoi su", "tin nong", "tin moi", "diem tin", "ban tin thoi su"
         )
-        if (newsEditorialSignatures.any { unaccentedCombined.contains(it) }) {
+        if (newsEditorialSignatures.any { ctx.unaccentedCombined.contains(it) }) {
             return true
         }
 
@@ -253,15 +146,15 @@ object SmartHeuristicParser {
             "plo.vn", "nld.com.vn", "vtc.vn", "vtc", "soha.vn", "soha"
         )
         val hasNewsPortal = newsPortals.any { portal ->
-            tokens.contains(portal) || unaccentedTokens.contains(portal) || unaccentedCombined.contains(portal)
+            ctx.tokens.contains(portal) || ctx.unaccentedTokens.contains(portal) || ctx.unaccentedCombined.contains(portal)
         }
-        if (hasNewsPortal && (unaccentedCombined.contains("thoi su") || unaccentedCombined.contains("tin tuc") || unaccentedCombined.contains("ngoai hang anh") || unaccentedCombined.contains("giao thong") || unaccentedCombined.contains("thoi tiet"))) {
+        if (hasNewsPortal && (ctx.unaccentedCombined.contains("thoi su") || ctx.unaccentedCombined.contains("tin tuc") || ctx.unaccentedCombined.contains("ngoai hang anh") || ctx.unaccentedCombined.contains("giao thong") || ctx.unaccentedCombined.contains("thoi tiet"))) {
             return true
         }
 
         // 3. Clear reading or article topics (e.g. "bài viết:", "tác giả:", "bài báo:")
-        val readingScore = countMatches(combined, unaccentedCombined, tokens, unaccentedTokens, READING_KEYWORDS)
-        val hasArticleCues = listOf("bai viet", "tac gia", "bai bao", "phong su", "un tac", "ket xe").any { unaccentedCombined.contains(it) }
+        val readingScore = countMatches(ctx.combined, ctx.unaccentedCombined, ctx.tokens, ctx.unaccentedTokens, READING_KEYWORDS)
+        val hasArticleCues = listOf("bai viet", "tac gia", "bai bao", "phong su", "un tac", "ket xe").any { ctx.unaccentedCombined.contains(it) }
 
         return hasArticleCues && readingScore >= 2
     }
@@ -273,12 +166,7 @@ object SmartHeuristicParser {
     }
 
     fun isTimetableOrSchedule(photoTitle: String, text: String): Boolean {
-        val lowerText = text.lowercase(Locale.getDefault())
-        val lowerTitle = photoTitle.lowercase(Locale.getDefault())
-        val combined = "$lowerTitle $lowerText"
-        val unaccentedCombined = VietnameseUtils.removeDiacritics(combined)
-        val tokens = tokenize(combined)
-        val unaccentedTokens = tokenize(unaccentedCombined)
+        val ctx = buildParsedContext(photoTitle, text)
 
         // 1. Explicit Schedule / Timetable Terminology
         val scheduleSignatures = listOf(
@@ -288,28 +176,28 @@ object SmartHeuristicParser {
             "lich bay", "lich thi", "lich cong tac", "doctor appointment", "meeting schedule",
             "class schedule", "exam schedule", "flight schedule", "work schedule"
         )
-        if (scheduleSignatures.any { unaccentedCombined.contains(it) }) {
+        if (scheduleSignatures.any { ctx.unaccentedCombined.contains(it) }) {
             return true
         }
 
         // 2. Day-of-week grid co-occurrence (e.g. Thứ 2, Thứ 3, Thứ 4, Thứ 5...)
         val daysOfWeek = listOf("thu 2", "thu 3", "thu 4", "thu 5", "thu 6", "thu 7", "chu nhat", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
-        val matchedDays = daysOfWeek.count { unaccentedCombined.contains(it) }
+        val matchedDays = daysOfWeek.count { ctx.unaccentedCombined.contains(it) }
 
         // 3. Shifts / Sessions (Sáng, Chiều, Tối, Ca, Buổi...)
         val shifts = listOf("buoi sang", "buoi chieu", "buoi toi", "ca sang", "ca chieu", "ca toi", "ca truc", "ca kham", "tang cuong", "ban mai", "tiet hoc")
-        val hasShift = shifts.any { unaccentedCombined.contains(it) } ||
-                ((unaccentedCombined.contains("sang:") || unaccentedCombined.contains("sang :") || unaccentedTokens.contains("sang")) &&
-                 (unaccentedCombined.contains("chieu:") || unaccentedCombined.contains("chieu :") || unaccentedTokens.contains("chieu")))
+        val hasShift = shifts.any { ctx.unaccentedCombined.contains(it) } ||
+                ((ctx.unaccentedCombined.contains("sang:") || ctx.unaccentedCombined.contains("sang :") || ctx.unaccentedTokens.contains("sang")) &&
+                 (ctx.unaccentedCombined.contains("chieu:") || ctx.unaccentedCombined.contains("chieu :") || ctx.unaccentedTokens.contains("chieu")))
 
         // 4. Time range pattern (e.g., "7h30 - 11h30", "13:15 - 17:00", "05g45 - 7g00")
         val timeIntervalRegex = Regex("""\b\d{1,2}[h:g]\d{0,2}\s*[-~–]\s*\d{1,2}[h:g]\d{0,2}\b""", RegexOption.IGNORE_CASE)
-        val timeIntervalMatches = timeIntervalRegex.findAll(combined).count()
+        val timeIntervalMatches = timeIntervalRegex.findAll(ctx.combined).count()
 
         if (matchedDays >= 2 && (hasShift || timeIntervalMatches >= 1)) {
             return true
         }
-        if (timeIntervalMatches >= 2 && (hasShift || unaccentedCombined.contains("tu ngay") || unaccentedCombined.contains("den ngay"))) {
+        if (timeIntervalMatches >= 2 && (hasShift || ctx.unaccentedCombined.contains("tu ngay") || ctx.unaccentedCombined.contains("den ngay"))) {
             return true
         }
 
@@ -317,15 +205,10 @@ object SmartHeuristicParser {
     }
 
     fun isShoppingContent(photoTitle: String, text: String): Boolean {
-        val lowerText = text.lowercase(Locale.getDefault())
-        val lowerTitle = photoTitle.lowercase(Locale.getDefault())
-        val combined = "$lowerTitle $lowerText"
-        val unaccentedCombined = VietnameseUtils.removeDiacritics(combined)
-        val tokens = tokenize(combined)
-        val unaccentedTokens = tokenize(unaccentedCombined)
+        val ctx = buildParsedContext(photoTitle, text)
 
         val explicitCartCues = listOf("gio hang", "them vao gio", "mua ngay", "dat hang", "don hang")
-        val hasExplicitCart = explicitCartCues.any { unaccentedCombined.contains(it) }
+        val hasExplicitCart = explicitCartCues.any { ctx.unaccentedCombined.contains(it) }
 
         // Timetables and schedules MUST NOT be classified as shopping unless an explicit cart action exists
         if (isTimetableOrSchedule(photoTitle, text) && !hasExplicitCart) {
@@ -338,27 +221,22 @@ object SmartHeuristicParser {
         }
 
         val priceRegex = Regex("""\d+[\.,]\d{3}\s*(đ|₫|vnd|\$)|(\$|₫|đ)\s*\d+|\b\d+k\b""", RegexOption.IGNORE_CASE)
-        val hasPrice = priceRegex.containsMatchIn(combined)
+        val hasPrice = priceRegex.containsMatchIn(ctx.combined)
 
         val ecomSites = listOf("shopee", "lazada", "tiki", "sendo", "amazon", "dienmayxanh", "dientumienbac", "nguyenkim", "cellphones", "fptshop", "thegioididong")
-        if (ecomSites.any { unaccentedCombined.contains(it) }) return true
+        if (ecomSites.any { ctx.unaccentedCombined.contains(it) }) return true
 
-        val shopScore = countMatches(combined, unaccentedCombined, tokens, unaccentedTokens, SHOPPING_KEYWORDS)
-        val prodScore = countMatches(combined, unaccentedCombined, tokens, unaccentedTokens, PRODUCT_KEYWORDS)
+        val shopScore = countMatches(ctx.combined, ctx.unaccentedCombined, ctx.tokens, ctx.unaccentedTokens, SHOPPING_KEYWORDS)
+        val prodScore = countMatches(ctx.combined, ctx.unaccentedCombined, ctx.tokens, ctx.unaccentedTokens, PRODUCT_KEYWORDS)
         if (hasPrice && prodScore >= 1) return true
         if (hasPrice && shopScore >= 1) return true
         return (shopScore + prodScore) >= 2
     }
 
     fun isPersonalContent(photoTitle: String, text: String): Boolean {
-        val lowerText = text.lowercase(Locale.getDefault())
-        val lowerTitle = photoTitle.lowercase(Locale.getDefault())
-        val combined = "$lowerTitle $lowerText"
-        val unaccentedCombined = VietnameseUtils.removeDiacritics(combined)
-        val tokens = tokenize(combined)
-        val unaccentedTokens = tokenize(unaccentedCombined)
+        val ctx = buildParsedContext(photoTitle, text)
 
-        val hasExplicitIdentityDoc = IDENTITY_DOC_SIGNATURES.any { unaccentedCombined.contains(it) }
+        val hasExplicitIdentityDoc = IDENTITY_DOC_SIGNATURES.any { ctx.unaccentedCombined.contains(it) }
 
         // Timetables and schedules MUST NOT be classified as personal unless explicit legal identity doc signatures exist
         if (isTimetableOrSchedule(photoTitle, text) && !hasExplicitIdentityDoc) {
@@ -370,28 +248,23 @@ object SmartHeuristicParser {
             return false
         }
 
-        return countMatches(combined, unaccentedCombined, tokens, unaccentedTokens, PERSONAL_KEYWORDS) > 0 || hasExplicitIdentityDoc
+        return countMatches(ctx.combined, ctx.unaccentedCombined, ctx.tokens, ctx.unaccentedTokens, PERSONAL_KEYWORDS) > 0 || hasExplicitIdentityDoc
     }
 
     fun isNatureContent(photoTitle: String, text: String): Boolean {
-        val lowerText = text.lowercase(Locale.getDefault())
-        val lowerTitle = photoTitle.lowercase(Locale.getDefault())
-        val combined = "$lowerTitle $lowerText"
-        val unaccentedCombined = VietnameseUtils.removeDiacritics(combined)
-        val tokens = tokenize(combined)
-        val unaccentedTokens = tokenize(unaccentedCombined)
+        val ctx = buildParsedContext(photoTitle, text)
 
         if (isPersonalContent(photoTitle, text)) {
             return false
         }
         val scenerySources = listOf("nationalgeographic", "natgeo", "geographic.com", "pexels", "unsplash", "pixabay", "wallpaper")
-        if (scenerySources.any { unaccentedCombined.contains(it) }) {
+        if (scenerySources.any { ctx.unaccentedCombined.contains(it) }) {
             return true
         }
         if (isShoppingContent(photoTitle, text)) {
             return false
         }
-        return countMatches(combined, unaccentedCombined, tokens, unaccentedTokens, NATURE_KEYWORDS) > 0
+        return countMatches(ctx.combined, ctx.unaccentedCombined, ctx.tokens, ctx.unaccentedTokens, NATURE_KEYWORDS) > 0
     }
 
     fun parse(
@@ -404,10 +277,11 @@ object SmartHeuristicParser {
         val visualResult = LocalImageLabeler.classifyLabels(visualLabels)
 
         val cleanedText = cleanStatusBarNoise(scrubbedText)
-        val lowerText = cleanedText.lowercase(Locale.getDefault())
-        val lowerTitle = photoTitle.lowercase(Locale.getDefault())
-        val combined = "$lowerTitle $lowerText"
-        val unaccentedCombined = VietnameseUtils.removeDiacritics(combined)
+        val ctx = buildParsedContext(photoTitle, cleanedText)
+        val combined = ctx.combined
+        val unaccentedCombined = ctx.unaccentedCombined
+        val tokens = ctx.tokens
+        val unaccentedTokens = ctx.unaccentedTokens
 
         val isTimetable = isTimetableOrSchedule(photoTitle, cleanedText)
         val isNews = isNewsOrReadingContent(photoTitle, cleanedText)
@@ -419,9 +293,6 @@ object SmartHeuristicParser {
 
         // Vector Semantic Search prediction (128D Cosine Similarity against Category Prototypes)
         val vectorPrediction = VectorSemanticSearchEngine.classifyByCategoryVector(cleanedText, photoTitle)
-
-        val tokens = tokenize(combined)
-        val unaccentedTokens = tokenize(unaccentedCombined)
         val title = extractTitle(cleanedText, photoTitle)
 
         // 0. Pro Feature: Check Custom AI Categories with Contextual Guardrails
@@ -518,10 +389,10 @@ object SmartHeuristicParser {
         val natureScore = if (personalScore > 0 || isTimetable || (shoppingScore >= 6 && !hasScenerySource && !visualResult.isNature && !visualResult.isAnimal)) 0 else rawNatureScore
 
         // 4. Calculate Event Trigger & Score
-        val hasEventTrigger = isTimetable || countMatches(combined, unaccentedCombined, tokens, unaccentedTokens, EVENT_ACTION_KEYWORDS) > 0 || vectorPrediction?.first == "cat_events"
+        val hasEventTrigger = isTimetable || countMatches(combined, unaccentedCombined, tokens, unaccentedTokens, EVENT_ACTION_KEYWORDS) > 0 || vectorPrediction?.first == DefaultCategories.EVENTS
         val eventScore = when {
             isTimetable -> 25
-            vectorPrediction?.first == "cat_events" -> 15
+            vectorPrediction?.first == DefaultCategories.EVENTS -> 15
             hasEventTrigger -> 5
             else -> 0
         }
@@ -542,7 +413,7 @@ object SmartHeuristicParser {
                     detectedIntent = "EVENT",
                     suggestedEventTitle = resolvedTitle,
                     suggestedEventDateMillis = dateMillis,
-                    targetCategoryId = "cat_events",
+                    targetCategoryId = DefaultCategories.EVENTS,
                     suggestedEventDescription = description
                 )
             }
@@ -554,7 +425,7 @@ object SmartHeuristicParser {
                     detectedIntent = "READING",
                     suggestedEventTitle = resolvedTitle,
                     suggestedEventDateMillis = null,
-                    targetCategoryId = "cat_reading",
+                    targetCategoryId = DefaultCategories.READING,
                     suggestedEventDescription = null
                 )
             }
@@ -568,7 +439,7 @@ object SmartHeuristicParser {
                     detectedIntent = "SHOPPING",
                     suggestedEventTitle = resolvedTitle,
                     suggestedEventDateMillis = dateMillis,
-                    targetCategoryId = "cat_tobuy",
+                    targetCategoryId = DefaultCategories.TO_BUY,
                     suggestedEventDescription = description
                 )
             }
@@ -582,7 +453,7 @@ object SmartHeuristicParser {
                     detectedIntent = "EVENT",
                     suggestedEventTitle = resolvedTitle,
                     suggestedEventDateMillis = dateMillis,
-                    targetCategoryId = "cat_events",
+                    targetCategoryId = DefaultCategories.EVENTS,
                     suggestedEventDescription = description
                 )
             }
@@ -598,7 +469,7 @@ object SmartHeuristicParser {
                     detectedIntent = "OTHER",
                     suggestedEventTitle = null,
                     suggestedEventDateMillis = null,
-                    targetCategoryId = "cat_personal",
+                    targetCategoryId = DefaultCategories.PERSONAL,
                     suggestedEventDescription = null,
                     semanticTags = tags
                 )
@@ -615,19 +486,19 @@ object SmartHeuristicParser {
                     detectedIntent = "OTHER",
                     suggestedEventTitle = null,
                     suggestedEventDateMillis = null,
-                    targetCategoryId = "cat_nature",
+                    targetCategoryId = DefaultCategories.NATURE,
                     suggestedEventDescription = null,
                     semanticTags = tags
                 )
             }
 
             // 7. Vector semantic classification fallback (Holistic 128D space alignment)
-            vectorPrediction != null && (vectorPrediction.first != "cat_nature" || isNatureContent(photoTitle, cleanedText)) -> {
+            vectorPrediction != null && (vectorPrediction.first != DefaultCategories.NATURE || isNatureContent(photoTitle, cleanedText)) -> {
                 val (catId, _) = vectorPrediction
                 val resolvedIntent = when (catId) {
-                    "cat_events" -> "EVENT"
-                    "cat_tobuy" -> "SHOPPING"
-                    "cat_reading" -> "READING"
+                    DefaultCategories.EVENTS -> "EVENT"
+                    DefaultCategories.TO_BUY -> "SHOPPING"
+                    DefaultCategories.READING -> "READING"
                     else -> "OTHER"
                 }
                 val resolvedTitle = if (resolvedIntent in listOf("EVENT", "SHOPPING", "READING")) {
@@ -654,7 +525,7 @@ object SmartHeuristicParser {
                     detectedIntent = "READING",
                     suggestedEventTitle = resolvedTitle,
                     suggestedEventDateMillis = null,
-                    targetCategoryId = "cat_reading",
+                    targetCategoryId = DefaultCategories.READING,
                     suggestedEventDescription = null
                 )
             }
@@ -668,7 +539,7 @@ object SmartHeuristicParser {
                     detectedIntent = "SHOPPING",
                     suggestedEventTitle = resolvedTitle,
                     suggestedEventDateMillis = dateMillis,
-                    targetCategoryId = "cat_tobuy",
+                    targetCategoryId = DefaultCategories.TO_BUY,
                     suggestedEventDescription = description
                 )
             }

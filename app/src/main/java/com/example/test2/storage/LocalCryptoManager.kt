@@ -29,12 +29,15 @@ import javax.crypto.spec.SecretKeySpec
  */
 object LocalCryptoManager {
 
+    const val ENCRYPTED_EXTENSION = ".enc"
+
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
     private const val KEY_ALIAS = "AntigravitySecureMasterKey"
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
     private const val GCM_IV_LENGTH = 12
     private const val GCM_TAG_LENGTH_BITS = 128
 
+    // Note: ByteArray cannot be `const` in Kotlin. This is effectively immutable — do NOT modify.
     // Magic 4-byte header identifying encrypted payloads: 'E', 'N', 'C', '1'
     private val MAGIC_HEADER = byteArrayOf(0x45, 0x4E, 0x43, 0x31)
 
@@ -78,7 +81,7 @@ object LocalCryptoManager {
         if (!file.exists() || !file.isFile || file.length() < (MAGIC_HEADER.size + GCM_IV_LENGTH)) {
             return false
         }
-        if (file.name.endsWith(".enc")) {
+        if (file.isEncryptedFile()) {
             return true
         }
         return try {
@@ -220,3 +223,7 @@ object LocalCryptoManager {
         }
     }
 }
+
+fun String.isEncryptedPath(): Boolean = endsWith(LocalCryptoManager.ENCRYPTED_EXTENSION)
+fun File.isEncryptedFile(): Boolean = name.endsWith(LocalCryptoManager.ENCRYPTED_EXTENSION)
+

@@ -1,5 +1,6 @@
 package com.example.test2.ai
 
+import com.example.test2.database.DefaultCategories
 import com.example.test2.shared.models.Category
 import com.example.test2.shared.utils.VietnameseUtils
 import java.nio.ByteBuffer
@@ -374,11 +375,11 @@ object VectorSemanticSearchEngine {
     }
 
     private val CATEGORY_PROTOTYPES = mapOf(
-        "cat_events" to "lịch trình thời gian sự kiện cuộc họp lịch hẹn chuyến bay vé máy bay lịch làm việc lịch khám ca trực thứ hai thứ ba thứ tư thứ năm thứ sáu thứ bảy chủ nhật sáng chiều tối giờ phút ngày tháng năm calendar schedule meeting appointment event flight timetable",
-        "cat_tobuy" to "mua sắm chi tiêu giá tiền sản phẩm đơn hàng hóa đơn thanh toán giỏ hàng mua ngay đặt hàng shopee lazada tiki chuyển khoản ưu đãi voucher freeship price cart order receipt discount purchase",
-        "cat_reading" to "đọc bài viết tin tức bài báo phóng sự tạp chí tác giả tòa soạn tin mới báo chí điểm tin thời sự giao thông thời tiết triều cường article news editorial reading author newsletter",
-        "cat_nature" to "thiên nhiên phong cảnh núi non đồi núi rừng rậm biển bãi biển hoàng hôn bình minh thác nước hồ nước phong cảnh đẹp scenic landscape nature mountain forest wallpaper ocean lake river",
-        "cat_personal" to "cá nhân giấy tờ tùy thân căn cước công dân chứng minh nhân dân hộ chiếu bằng lái xe cccd cmnd gplx ảnh chân dung tự sướng profile identity card selfie portrait passport"
+        DefaultCategories.EVENTS to "lịch trình thời gian sự kiện cuộc họp lịch hẹn chuyến bay vé máy bay lịch làm việc lịch khám ca trực thứ hai thứ ba thứ tư thứ năm thứ sáu thứ bảy chủ nhật sáng chiều tối giờ phút ngày tháng năm calendar schedule meeting appointment event flight timetable",
+        DefaultCategories.TO_BUY to "mua sắm chi tiêu giá tiền sản phẩm đơn hàng hóa đơn thanh toán giỏ hàng mua ngay đặt hàng shopee lazada tiki chuyển khoản ưu đãi voucher freeship price cart order receipt discount purchase",
+        DefaultCategories.READING to "đọc bài viết tin tức bài báo phóng sự tạp chí tác giả tòa soạn tin mới báo chí điểm tin thời sự giao thông thời tiết triều cường article news editorial reading author newsletter",
+        DefaultCategories.NATURE to "thiên nhiên phong cảnh núi non đồi núi rừng rậm biển bãi biển hoàng hôn bình minh thác nước hồ nước phong cảnh đẹp scenic landscape nature mountain forest wallpaper ocean lake river",
+        DefaultCategories.PERSONAL to "cá nhân giấy tờ tùy thân căn cước công dân chứng minh nhân dân hộ chiếu bằng lái xe cccd cmnd gplx ảnh chân dung tự sướng profile identity card selfie portrait passport"
     )
 
     private val categoryVectors: Map<String, FloatArray> by lazy {
@@ -387,9 +388,9 @@ object VectorSemanticSearchEngine {
                 text = text,
                 title = text,
                 intent = when (catId) {
-                    "cat_events" -> "EVENT"
-                    "cat_tobuy" -> "SHOPPING"
-                    "cat_reading" -> "READING"
+                    DefaultCategories.EVENTS -> "EVENT"
+                    DefaultCategories.TO_BUY -> "SHOPPING"
+                    DefaultCategories.READING -> "READING"
                     else -> "OTHER"
                 },
                 categoryNames = listOf(catId)

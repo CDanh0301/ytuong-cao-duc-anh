@@ -2,6 +2,7 @@ package com.example.test2.ai
 
 import android.content.Context
 import com.example.test2.database.AppDatabaseHelper
+import com.example.test2.database.DefaultCategories
 import com.example.test2.shared.models.Category
 import com.example.test2.shared.models.Photo
 import com.example.test2.shared.utils.VietnameseUtils
@@ -250,7 +251,7 @@ object RetroactiveCategorizer {
         // Guardrail C: Conflict with strong distinct Intent (e.g. Banking receipt vs Learning material)
         val hasExplicitBankingIntent = (photo.semanticTags.contains("receipt") || photo.semanticTags.contains("banking")) &&
                 (textLower.contains("giao dịch thành công") || textLower.contains("digital banking") || textLower.contains("chuyển khoản") || textLower.contains("số tiền"))
-        val isNonFinancialCategory = category.id == "cat_reading" || category.id == "cat_nature" ||
+        val isNonFinancialCategory = category.id == DefaultCategories.READING || category.id == DefaultCategories.NATURE ||
                 catLower.contains("học tập") || catLower.contains("thiên nhiên") || catLower.contains("sách") || catLower.contains("tài liệu")
         if (hasExplicitBankingIntent && isNonFinancialCategory && !hasDirectTitleMatch) {
             penalty += 40f

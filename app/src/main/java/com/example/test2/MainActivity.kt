@@ -50,6 +50,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.test2.ai.SmartHeuristicParser
+import com.example.test2.database.DefaultCategories
 import com.example.test2.notifications.ScreenshotNotificationHelper
 import com.example.test2.ui.AppTab
 import com.example.test2.ui.PhotoAppViewModel
@@ -394,7 +395,7 @@ class MainActivity : FragmentActivity() {
                                     onCleanClutter = { viewModel.cleanAgingScreenshots(it) },
                                     onDeleteSinglePhoto = { viewModel.setPhotoToDelete(it) },
                                     onAddToCalendar = { photo ->
-                                        val isShopping = photo.detectedIntent == "SHOPPING" || photo.categoryIds.contains("cat_tobuy")
+                                        val isShopping = photo.detectedIntent == "SHOPPING" || photo.categoryIds.contains(DefaultCategories.TO_BUY)
                                         val time = photo.suggestedEventDateMillis ?: if (isShopping) {
                                             System.currentTimeMillis() + 24 * 3600_000L
                                         } else {
@@ -450,7 +451,7 @@ class MainActivity : FragmentActivity() {
                             viewModel.toggleFavorite(photo.id)
                         },
                         onAddToCalendar = { photo ->
-                            val isShopping = photo.detectedIntent == "SHOPPING" || photo.categoryIds.contains("cat_tobuy")
+                            val isShopping = photo.detectedIntent == "SHOPPING" || photo.categoryIds.contains(DefaultCategories.TO_BUY)
                             val time = photo.suggestedEventDateMillis ?: if (isShopping) {
                                 System.currentTimeMillis() + 24 * 3600_000L
                             } else {

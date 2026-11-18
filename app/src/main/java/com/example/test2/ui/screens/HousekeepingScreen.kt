@@ -73,6 +73,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Lock
+import com.example.test2.database.DefaultCategories
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -115,8 +116,8 @@ fun HousekeepingScreen(
                 photo.suggestedEventDateMillis != null ||
                 photo.detectedIntent == "EVENT" ||
                 photo.detectedIntent == "SHOPPING" ||
-                photo.categoryIds.contains("cat_tobuy") ||
-                photo.categoryIds.contains("cat_events")
+                photo.categoryIds.contains(DefaultCategories.TO_BUY) ||
+                photo.categoryIds.contains(DefaultCategories.EVENTS)
             )
         }
     }
@@ -1011,7 +1012,7 @@ fun EventCard(
     onAddToCalendar: () -> Unit,
     onPhotoClick: () -> Unit
 ) {
-    val isShopping = photo.detectedIntent == "SHOPPING" || photo.categoryIds.contains("cat_tobuy")
+    val isShopping = photo.detectedIntent == "SHOPPING" || photo.categoryIds.contains(DefaultCategories.TO_BUY)
     val dateText = remember(photo.suggestedEventDateMillis, isShopping) {
         val millis = photo.suggestedEventDateMillis ?: 0L
         if (millis > 0) {

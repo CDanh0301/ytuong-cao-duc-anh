@@ -8,8 +8,6 @@ import android.content.pm.PackageManager
 import android.database.ContentObserver
 import android.net.Uri
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.provider.MediaStore
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
@@ -22,12 +20,16 @@ import com.example.test2.ai.LocalImageLabeler
 import com.example.test2.ai.MlKitOcrEngine
 import com.example.test2.ai.PiiScrubber
 import com.example.test2.ai.RetroactiveCategorizer
+import com.example.test2.ai.PhotoProcessingCoordinator
+import com.example.test2.ai.SemanticSearchCoordinator
 import com.example.test2.ai.SmartHeuristicParser
 import com.example.test2.ai.TemporalQueryParser
 import com.example.test2.ai.VectorSemanticSearchEngine
 import com.example.test2.database.AppDatabaseHelper
 import com.example.test2.notifications.ScreenshotNotificationHelper
 import com.example.test2.security.PrivacyVaultManager
+import com.example.test2.storage.isEncryptedPath
+import java.io.File
 import com.example.test2.services.AgingJobScheduler
 import com.example.test2.services.AgingMonitorManager
 import com.example.test2.services.ScreenshotDetectionManager
@@ -69,10 +71,13 @@ enum class GalleryDisplayMode {
 }
 
 class PhotoAppViewModel(application: Application) : AndroidViewModel(application) {
+    private val app: Application = application
     private val persistenceDriver = AndroidFilePersistenceDriver(application)
     val repository = PhotoRepository(persistenceDriver, viewModelScope)
     private val storage = AndroidPhotoStorage(application)
     private val dbHelper = AppDatabaseHelper.getInstance(application)
+    private val processingCoordinator = PhotoProcessingCoordinator(application, repository, dbHelper)
+    private val searchCoordinator = SemanticSearchCoordinator(application, repository, dbHelper)
     private val notifiedScreenshotIds = mutableSetOf<String>()
     private val appStartTime = System.currentTimeMillis()
     private val mediaScanner = DeviceMediaScanner(application)
@@ -128,8 +133,8 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
     private val _isRestoringPhotos = MutableStateFlow(false)
     val isRestoringPhotos: StateFlow<Boolean> = _isRestoringPhotos.asStateFlow()
 
-    private val _restoreProgress = MutableStateFlow(Pair(0, 0))
-    val restoreProgress: StateFlow<Pair<Int, Int>> = _restoreProgress.asStateFlow()
+    private val _restoreProgress = MutableStateFlow(RestoreProgress(0, 0))
+    val restoreProgress: StateFlow<RestoreProgress> = _restoreProgress.asStateFlow()
 
     private val _showDisableVaultDialog = MutableStateFlow(false)
     val showDisableVaultDialog: StateFlow<Boolean> = _showDisableVaultDialog.asStateFlow()
@@ -238,9 +243,9 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
                 val records = dbHelper.getProcessedScreenshotsByIds(completedIds)
                 val updates = records.mapNotNull { record ->
                     val resolvedCatId = record.targetCategoryId
-                    val isVaulted = record.filePath.endsWith(".enc")
+                    val isVaulted = record.filePath.isEncryptedPath()
                     if (!resolvedCatId.isNullOrBlank() || isVaulted) {
-                        val vaultedFile = if (isVaulted) java.io.File(record.filePath) else null
+                        val vaultedFile = if (isVaulted) File(record.filePath) else null
                         PhotoAiMetadataUpdate(
                             photoId = record.photoId,
                             newFilePath = if (isVaulted) record.filePath else null,
@@ -280,11 +285,11 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
                     if (record != null) {
                         val currentCatId = photo.categoryIds.firstOrNull { it.startsWith("cat_") || it in repository.categories.value.map { c -> c.id } }
                         val catNeedsUpdate = !record.targetCategoryId.isNullOrBlank() && currentCatId != record.targetCategoryId
-                        val pathNeedsUpdate = record.filePath.endsWith(".enc") && !photo.filePath.endsWith(".enc")
+                        val pathNeedsUpdate = record.filePath.isEncryptedPath() && !photo.filePath.isEncryptedPath()
                         val metaNeedsUpdate = !record.eventDescription.isNullOrBlank() && photo.suggestedEventDescription != record.eventDescription
 
                         if (catNeedsUpdate || pathNeedsUpdate || metaNeedsUpdate || !photo.isProcessed) {
-                            val vaultedFile = if (record.filePath.endsWith(".enc")) java.io.File(record.filePath) else null
+                            val vaultedFile = if (record.filePath.isEncryptedPath()) File(record.filePath) else null
                             updates.add(
                                 PhotoAiMetadataUpdate(
                                     photoId = record.photoId,
@@ -315,7 +320,6 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun checkInitialPermission(): Boolean {
-        val app = getApplication<Application>()
         val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             Manifest.permission.READ_MEDIA_IMAGES
         } else {
@@ -327,7 +331,6 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
     fun onPermissionResult(granted: Boolean) {
         _hasStoragePermission.value = granted
         if (granted) {
-            val app = getApplication<Application>()
             ScreenshotJobScheduler.schedule(app)
             registerMediaObserver()
             if (!PrivacyVaultManager.hasPromptedConsent(app)) {
@@ -338,21 +341,18 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun checkPrivacyConsentPrompt() {
-        val app = getApplication<Application>()
         if (_hasStoragePermission.value && !PrivacyVaultManager.hasPromptedConsent(app)) {
             _showPrivacyConsentDialog.value = true
         }
     }
 
     fun onEnableVault() {
-        val app = getApplication<Application>()
         PrivacyVaultManager.setPromptedConsent(app, true)
         _showPrivacyConsentDialog.value = false
         confirmEnableVault(vaultAll = true)
     }
 
     fun onKeepStandard() {
-        val app = getApplication<Application>()
         PrivacyVaultManager.setVaultEnabled(app, false)
         PrivacyVaultManager.setPromptedConsent(app, true)
         _isVaultEnabled.value = false
@@ -377,7 +377,6 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun confirmEnableVault(vaultAll: Boolean) {
-        val app = getApplication<Application>()
         val scope = if (vaultAll) PrivacyVaultManager.SCOPE_ALL else PrivacyVaultManager.SCOPE_NEW_ONLY
         PrivacyVaultManager.setVaultScope(app, scope)
         PrivacyVaultManager.setVaultEnabledSince(app, System.currentTimeMillis())
@@ -394,7 +393,6 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun checkVaultPermissionResumed() {
-        val app = getApplication<Application>()
         if (pendingVaultScanAfterPermission && PrivacyVaultManager.hasAllFilesAccess(app)) {
             pendingVaultScanAfterPermission = false
             scanDevicePhotos()
@@ -402,9 +400,8 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun requestDisableVault() {
-        val app = getApplication<Application>()
         val vaultedCount = repository.photos.value.count {
-            it.filePath.endsWith(".enc") || (it.isScreenshot && !it.filePath.startsWith("content://"))
+            it.filePath.isEncryptedPath() || (it.isScreenshot && !it.filePath.startsWith("content://"))
         }
         if (vaultedCount > 0) {
             _showDisableVaultDialog.value = true
@@ -422,10 +419,9 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
 
     fun restoreAllVaultedPhotos() {
         viewModelScope.launch(Dispatchers.IO) {
-            val app = getApplication<Application>()
             val currentPhotos = repository.photos.value
             val vaultedList = currentPhotos.filter {
-                it.filePath.endsWith(".enc") || (it.isScreenshot && !it.filePath.startsWith("content://"))
+                it.filePath.isEncryptedPath() || (it.isScreenshot && !it.filePath.startsWith("content://"))
             }
 
             if (vaultedList.isEmpty()) {
@@ -437,7 +433,7 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
             }
 
             _isRestoringPhotos.value = true
-            _restoreProgress.value = Pair(0, vaultedList.size)
+            _restoreProgress.value = RestoreProgress(0, vaultedList.size)
 
             var restoredCount = 0
             for (photo in vaultedList) {
@@ -469,7 +465,7 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
                     )
                 }
                 restoredCount++
-                _restoreProgress.value = Pair(restoredCount, vaultedList.size)
+                _restoreProgress.value = RestoreProgress(restoredCount, vaultedList.size)
             }
 
             PrivacyVaultManager.setVaultEnabled(app, false)
@@ -502,8 +498,7 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
 
     fun registerMediaObserver() {
         if (contentObserver != null) return
-        val handler = Handler(Looper.getMainLooper())
-        contentObserver = object : ContentObserver(handler) {
+        contentObserver = object : ContentObserver(null) {
             private var lastTriggerTime = 0L
 
             override fun onChange(selfChange: Boolean, uri: Uri?) {
@@ -522,7 +517,7 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
             }
         }
         try {
-            getApplication<Application>().contentResolver.registerContentObserver(
+            app.contentResolver.registerContentObserver(
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
                 true,
                 contentObserver!!
@@ -534,7 +529,7 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
     private fun unregisterMediaObserver() {
         contentObserver?.let {
             try {
-                getApplication<Application>().contentResolver.unregisterContentObserver(it)
+                app.contentResolver.unregisterContentObserver(it)
             } catch (_: Exception) {
             }
             contentObserver = null
@@ -552,11 +547,10 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
             updateScanningState()
             val scanResult = mediaScanner.scanDeviceImages()
             if (scanResult.photos.isNotEmpty() || scanResult.folders.isNotEmpty()) {
-                val app = getApplication<Application>()
                 val processedPhotos = if (_isVaultEnabled.value && PrivacyVaultManager.hasAllFilesAccess(app)) {
                     withContext(Dispatchers.IO) {
                         scanResult.photos.map { photo ->
-                            if (photo.isScreenshot && !photo.filePath.endsWith(".enc") && PrivacyVaultManager.shouldVaultScreenshot(app, photo.dateAdded)) {
+                            if (photo.isScreenshot && !photo.filePath.isEncryptedPath() && PrivacyVaultManager.shouldVaultScreenshot(app, photo.dateAdded)) {
                                 val uri = if (photo.filePath.startsWith("content://")) Uri.parse(photo.filePath) else null
                                 val vaulted = PrivacyVaultManager.vaultAndEvictScreenshot(
                                     app,
@@ -608,14 +602,13 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
             processNewScreenshots()
             // After on-device triage completes processing all new screenshots,
             // trigger WorkManager to progressively enrich them via Cloud AI
-            ScreenshotQueueWorker.enqueue(getApplication())
+            ScreenshotQueueWorker.enqueue(app)
         }
     }
 
     // IDEA.md: Process unprocessed screenshots through ML Kit OCR, PII scrubber, Smart Heuristics & FTS5 indexing
     private suspend fun processNewScreenshots() {
         val currentPhotos = repository.photos.value
-        val app = getApplication<Application>()
         for (photo in currentPhotos) {
             // Never overwrite cloud-enriched photos
             if (photo.isCloudEnriched) {
@@ -646,34 +639,7 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
             if (isCandidate && needsOcr) {
                 val cached = dbHelper.getProcessedScreenshot(photo.id)
                 if (cached != null && !cached.scrubbedText.isNullOrBlank()) {
-                    var resolvedCatId = cached.targetCategoryId
-                    // Re-verify against user custom categories: prevent newly taken photos from being trapped
-                    // in default categories when user-defined categories match
-                    val customCats = repository.categories.value.filter { it.id !in SmartHeuristicParser.DEFAULT_CATEGORY_IDS }
-                    if (customCats.isNotEmpty() && (resolvedCatId == null || resolvedCatId in SmartHeuristicParser.DEFAULT_CATEGORY_IDS)) {
-                        val visualAnalysis = LocalImageLabeler.analyze(app, photo.filePath)
-                        val recheck = SmartHeuristicParser.parse(
-                            scrubbedText = cached.scrubbedText ?: "",
-                            photoTitle = photo.title,
-                            customCategories = repository.categories.value,
-                            hasFace = visualAnalysis.isPerson,
-                            visualLabels = visualAnalysis.rawLabels
-                        )
-                        if (recheck.targetCategoryId != null && recheck.targetCategoryId !in SmartHeuristicParser.DEFAULT_CATEGORY_IDS) {
-                            resolvedCatId = recheck.targetCategoryId
-                            dbHelper.recordProcessedScreenshot(
-                                photoId = photo.id,
-                                filePath = photo.filePath,
-                                dateAdded = photo.dateAdded,
-                                scrubbedText = cached.scrubbedText ?: "",
-                                detectedIntent = cached.detectedIntent,
-                                eventTitle = cached.eventTitle,
-                                eventDateMillis = cached.eventDateMillis,
-                                targetCategoryId = resolvedCatId,
-                                eventDescription = cached.eventDescription
-                            )
-                        }
-                    }
+                    val resolvedCatId = processingCoordinator.recheckWithCustomCategories(photo, cached)
 
                     repository.updatePhotoAiMetadata(
                         photoId = photo.id,
@@ -689,240 +655,7 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
                     continue
                 }
 
-                // Step 2 in IDEA.md: Pre-filtering junk, memes, or blank icons without consuming quota
-                if (SmartHeuristicParser.isJunkOrMeme(photo)) {
-                    repository.updatePhotoAiMetadata(
-                        photoId = photo.id,
-                        isScreenshot = true,
-                        piiScrubbedText = "",
-                        detectedIntent = null,
-                        suggestedEventTitle = null,
-                        suggestedEventDateMillis = null,
-                        targetCategoryId = null,
-                        isProcessed = true
-                    )
-                    continue
-                }
-
-                // Step 2: Unified On-Device Vision Analysis (ML Kit Image Labeling)
-                val visualAnalysis = LocalImageLabeler.analyze(app, photo.filePath)
-
-                // Short-Circuit Optimization: Pure Nature, Landscape, Scenery & Animal photos without text
-                if ((visualAnalysis.isNature || visualAnalysis.isAnimal) && !visualAnalysis.hasTextOrDoc) {
-                    val targetCatId = "cat_nature"
-                    val categoryNames = repository.categories.value
-                        .filter { it.id == targetCatId }
-                        .joinToString(" ") { it.name }
-
-                    val semanticTags = visualAnalysis.vietnameseSemanticTags.ifEmpty {
-                        if (visualAnalysis.isAnimal) listOf("động vật", "thú cưng") else listOf("thiên nhiên", "phong cảnh")
-                    }
-                    val semanticTagsStr = semanticTags.joinToString(" ")
-                    val fullSemanticText = "${photo.title} Thiên nhiên phong cảnh $semanticTagsStr".trim()
-
-                    dbHelper.indexPhotoFts(
-                        photoId = photo.id,
-                        title = photo.title,
-                        scrubbedText = fullSemanticText,
-                        intent = "OTHER",
-                        categoryNames = categoryNames,
-                        semanticTags = semanticTagsStr
-                    )
-
-                    if (repository.accountTier.value.isPro) {
-                        val embedding = VectorSemanticSearchEngine.generateEmbedding(
-                            text = fullSemanticText,
-                            title = photo.title,
-                            intent = "OTHER",
-                            categoryNames = if (categoryNames.isNotBlank()) listOf(categoryNames) else emptyList()
-                        )
-                        dbHelper.savePhotoVector(photo.id, embedding, "OTHER")
-                        dbHelper.enqueueScreenshot(
-                            photoId = photo.id,
-                            filePath = photo.filePath,
-                            dateAdded = photo.dateAdded,
-                            isLiveCapture = false,
-                            photoTitle = photo.title,
-                            originalFileName = photo.fileName
-                        )
-                    }
-
-                    repository.updatePhotoAiMetadata(
-                        photoId = photo.id,
-                        isScreenshot = true,
-                        piiScrubbedText = "",
-                        detectedIntent = null,
-                        suggestedEventTitle = null,
-                        suggestedEventDateMillis = null,
-                        targetCategoryId = targetCatId,
-                        isProcessed = true,
-                        isCloudEnriched = false,
-                        suggestedEventDescription = null,
-                        semanticTags = semanticTags
-                    )
-                    continue
-                }
-
-                // Step 3 in IDEA.md: Local OCR & Vision Analysis on device
-                val ocrText = MlKitOcrEngine.recognizeText(app, photo.filePath)
-                val hasFace = visualAnalysis.isPerson
-                if (ocrText.isBlank() || ocrText.trim().length < 4) {
-                    // Blank lock-screens or images without useful text: check filename/folder cues, face and visual labels
-                    val heuristic = SmartHeuristicParser.parse(
-                        scrubbedText = "",
-                        photoTitle = "${photo.folderId} ${photo.title}",
-                        hasFace = hasFace,
-                        visualLabels = visualAnalysis.rawLabels
-                    )
-                    val targetCatId = heuristic.targetCategoryId
-                    val categoryNames = repository.categories.value
-                        .filter { it.id == targetCatId }
-                        .joinToString(" ") { it.name }
-
-                    val semanticTags = heuristic.semanticTags.ifEmpty { visualAnalysis.vietnameseSemanticTags }
-                    val semanticTagsStr = semanticTags.joinToString(" ")
-                    val fullSemanticText = "${photo.title} $semanticTagsStr".trim()
-
-                    dbHelper.indexPhotoFts(
-                        photoId = photo.id,
-                        title = photo.title,
-                        scrubbedText = fullSemanticText,
-                        intent = heuristic.detectedIntent,
-                        categoryNames = categoryNames,
-                        semanticTags = semanticTagsStr
-                    )
-
-                    if (repository.accountTier.value.isPro) {
-                        val embedding = VectorSemanticSearchEngine.generateEmbedding(
-                            text = "${photo.folderId ?: ""} $categoryNames $semanticTagsStr",
-                            title = photo.title,
-                            intent = heuristic.detectedIntent,
-                            categoryNames = if (categoryNames.isNotBlank()) listOf(categoryNames) else emptyList()
-                        )
-                        dbHelper.savePhotoVector(photo.id, embedding, heuristic.detectedIntent)
-                        if (fullSemanticText.isNotBlank()) {
-                            dbHelper.enqueueScreenshot(
-                                photoId = photo.id,
-                                filePath = photo.filePath,
-                                dateAdded = photo.dateAdded,
-                                isLiveCapture = false,
-                                photoTitle = photo.title,
-                                originalFileName = photo.fileName
-                            )
-                        }
-                    }
-
-                    // Check if photo still has informative visual content (e.g. receipt/doc/ticket/invoice)
-                    val hasInformativeVisual = visualAnalysis.isPerson || visualAnalysis.hasTextOrDoc ||
-                        visualAnalysis.rawLabels.any {
-                            it.equals("Receipt", ignoreCase = true) ||
-                            it.equals("Document", ignoreCase = true) ||
-                            it.equals("Paper", ignoreCase = true) ||
-                            it.equals("Invoice", ignoreCase = true) ||
-                            it.equals("Identity document", ignoreCase = true) ||
-                            it.equals("Ticket", ignoreCase = true) ||
-                            it.equals("Poster", ignoreCase = true)
-                        }
-                    if (hasInformativeVisual) {
-                        dbHelper.enqueueScreenshot(
-                            photoId = photo.id,
-                            filePath = photo.filePath,
-                            dateAdded = photo.dateAdded,
-                            isLiveCapture = false,
-                            scrubbedText = "",
-                            photoTitle = photo.title,
-                            originalFileName = photo.fileName
-                        )
-                    }
-
-                    repository.updatePhotoAiMetadata(
-                        photoId = photo.id,
-                        isScreenshot = true,
-                        piiScrubbedText = "",
-                        detectedIntent = heuristic.detectedIntent.takeIf { it != "OTHER" },
-                        suggestedEventTitle = heuristic.suggestedEventTitle.takeIf { heuristic.detectedIntent == "EVENT" || heuristic.detectedIntent == "SHOPPING" }
-                            ?: photo.title.takeIf { targetCatId == "cat_tobuy" },
-                        suggestedEventDateMillis = heuristic.suggestedEventDateMillis,
-                        targetCategoryId = targetCatId,
-                        isProcessed = true,
-                        isCloudEnriched = false,
-                        suggestedEventDescription = heuristic.suggestedEventDescription,
-                        semanticTags = semanticTags
-                    )
-                    continue
-                }
-
-                // Step 3 in IDEA.md: Local PII Scrubbing on device
-                val piiResult = PiiScrubber.scrub(ocrText)
-
-                // Step 4: Instant Local-First Processing (ML Kit Vision + OCR + SmartHeuristics + FTS5 + 128D Vector)
-                // Guarantees zero latency UX (< 2s for all photos) and zero quota consumed on initial UI load.
-                val heuristic = SmartHeuristicParser.parse(
-                    scrubbedText = piiResult.scrubbedText,
-                    photoTitle = photo.title,
-                    customCategories = repository.categories.value,
-                    hasFace = hasFace,
-                    visualLabels = visualAnalysis.rawLabels
-                )
-                val targetCatId = heuristic.targetCategoryId
-                val categoryNames = repository.categories.value
-                    .filter { it.id == targetCatId }
-                    .joinToString(" ") { it.name }
-
-                val semanticTags = (heuristic.semanticTags + visualAnalysis.vietnameseSemanticTags).distinct()
-                val semanticTagsStr = semanticTags.joinToString(" ")
-                val fullSemanticText = buildString {
-                    append(piiResult.scrubbedText)
-                    if (!heuristic.suggestedEventTitle.isNullOrBlank()) append(" ").append(heuristic.suggestedEventTitle)
-                    if (!heuristic.suggestedEventDescription.isNullOrBlank()) append(" ").append(heuristic.suggestedEventDescription)
-                    if (semanticTagsStr.isNotBlank()) append(" ").append(semanticTagsStr)
-                }.trim()
-
-                dbHelper.indexPhotoFts(
-                    photoId = photo.id,
-                    title = photo.title,
-                    scrubbedText = fullSemanticText,
-                    intent = heuristic.detectedIntent,
-                    categoryNames = categoryNames,
-                    semanticTags = semanticTagsStr
-                )
-
-                if (repository.accountTier.value.isPro) {
-                    val embedding = VectorSemanticSearchEngine.generateEmbedding(
-                        text = fullSemanticText,
-                        title = heuristic.suggestedEventTitle ?: photo.title,
-                        intent = heuristic.detectedIntent,
-                        categoryNames = if (categoryNames.isNotBlank()) listOf(categoryNames) else emptyList(),
-                        customCategories = repository.categories.value
-                    )
-                    dbHelper.savePhotoVector(photo.id, embedding, heuristic.detectedIntent)
-                }
-
-                repository.updatePhotoAiMetadata(
-                    photoId = photo.id,
-                    isScreenshot = true,
-                    piiScrubbedText = piiResult.scrubbedText,
-                    detectedIntent = heuristic.detectedIntent.takeIf { it != "OTHER" },
-                    suggestedEventTitle = heuristic.suggestedEventTitle.takeIf { heuristic.detectedIntent == "EVENT" || heuristic.detectedIntent == "SHOPPING" }
-                        ?: photo.title.takeIf { targetCatId == "cat_tobuy" },
-                    suggestedEventDateMillis = heuristic.suggestedEventDateMillis,
-                    targetCategoryId = targetCatId,
-                    isProcessed = true,
-                    isCloudEnriched = false,
-                    suggestedEventDescription = heuristic.suggestedEventDescription,
-                    semanticTags = semanticTags
-                )
-
-                // Enqueue to background queue for progressive Cloud enrichment (Gemini batching & neural vectors)
-                dbHelper.enqueueScreenshot(
-                    photoId = photo.id,
-                    filePath = photo.filePath,
-                    dateAdded = photo.dateAdded,
-                    isLiveCapture = false,
-                    scrubbedText = piiResult.scrubbedText,
-                    photoTitle = photo.title,
-                    originalFileName = photo.fileName
-                )
+                processingCoordinator.runOnDevicePipeline(photo)
             } else if (!photo.piiScrubbedText.isNullOrBlank()) {
                 // Keep FTS updated for previously processed photos
                 val categoryNames = repository.categories.value
@@ -971,77 +704,7 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
         val photo = repository.photos.value.firstOrNull { it.id == photoId } ?: return
         viewModelScope.launch {
             _isScanning.value = true
-            val app = getApplication<Application>()
-            val visualAnalysis = LocalImageLabeler.analyze(app, photo.filePath)
-            val hasFace = visualAnalysis.isPerson
-            val ocrText = if ((visualAnalysis.isNature || visualAnalysis.isAnimal) && !visualAnalysis.hasTextOrDoc) "" else MlKitOcrEngine.recognizeText(app, photo.filePath)
-            val piiResult = PiiScrubber.scrub(ocrText)
-            val parsed = CloudAiBackendClient.analyzeWithFallback(
-                context = app,
-                scrubbedText = piiResult.scrubbedText,
-                photoTitle = photo.title,
-                categories = repository.categories.value,
-                isPro = repository.accountTier.value.isPro,
-                hasFace = hasFace,
-                visualLabels = visualAnalysis.rawLabels
-            )
-
-            val categoryNames = repository.categories.value
-                .filter { it.id == parsed.targetCategoryId }
-                .joinToString(" ") { it.name }
-
-            dbHelper.indexPhotoFts(
-                photoId = photo.id,
-                title = photo.title,
-                scrubbedText = piiResult.scrubbedText,
-                intent = parsed.detectedIntent,
-                categoryNames = categoryNames
-            )
-
-            // Index in Vector Semantic Search (IDEA.md Part 3 & Step 6 - Pro Tier)
-            val embedding = VectorSemanticSearchEngine.generateEmbedding(
-                text = piiResult.scrubbedText,
-                title = photo.title,
-                intent = parsed.detectedIntent,
-                categoryNames = if (categoryNames.isNotBlank()) listOf(categoryNames) else emptyList(),
-                customCategories = repository.categories.value
-            )
-            dbHelper.savePhotoVector(photo.id, embedding, parsed.detectedIntent)
-
-            if (repository.accountTier.value.isPro && piiResult.scrubbedText.isNotBlank()) {
-                val apiKey = CloudAiConfigManager.getApiKey(app)
-                if (apiKey.isNotBlank()) {
-                    val neuralVec = CloudAiBackendClient.getEmbedding(piiResult.scrubbedText, apiKey)
-                    if (neuralVec != null) {
-                        dbHelper.savePhotoNeuralVector(photo.id, neuralVec)
-                    }
-                }
-            }
-
-            dbHelper.markQueueItemProcessed(photo.id, "COMPLETED")
-
-            dbHelper.recordProcessedScreenshot(
-                photoId = photo.id,
-                filePath = photo.filePath,
-                dateAdded = photo.dateAdded,
-                scrubbedText = piiResult.scrubbedText,
-                detectedIntent = parsed.detectedIntent,
-                eventTitle = parsed.suggestedEventTitle,
-                eventDateMillis = parsed.suggestedEventDateMillis,
-                targetCategoryId = parsed.targetCategoryId
-            )
-
-            repository.updatePhotoAiMetadata(
-                photoId = photo.id,
-                isScreenshot = true,
-                piiScrubbedText = piiResult.scrubbedText,
-                detectedIntent = parsed.detectedIntent,
-                suggestedEventTitle = parsed.suggestedEventTitle,
-                suggestedEventDateMillis = parsed.suggestedEventDateMillis,
-                targetCategoryId = parsed.targetCategoryId,
-                isProcessed = true
-            )
-
+            processingCoordinator.scanPhotoWithCloud(photo)
             // Update photoSettings modal state if open
             if (_photoSettings.value?.id == photoId) {
                 _photoSettings.value = repository.photos.value.firstOrNull { it.id == photoId }
@@ -1097,7 +760,6 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
             } else {
                 emptySet()
             }
-            val app = getApplication<Application>()
 
             for ((index, uri) in uris.withIndex()) {
                 val stored = storage.saveImageFromUri(uri)
@@ -1119,164 +781,20 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
                         fileSizeBytes = stored.fileSizeBytes
                     )
 
-                    if (SmartHeuristicParser.isJunkOrMeme(photo)) {
-                        // Junk or meme: do not consume quota
-                        repository.updatePhotoAiMetadata(
+                    val nowScan = System.currentTimeMillis()
+                    if (repository.canUseAiScan(nowScan) && !SmartHeuristicParser.isJunkOrMeme(photo)) {
+                        repository.incrementQuotaUsage(nowScan)
+                        dbHelper.enqueueScreenshot(
                             photoId = photo.id,
-                            isScreenshot = true,
-                            piiScrubbedText = "",
-                            detectedIntent = null,
-                            suggestedEventTitle = null,
-                            suggestedEventDateMillis = null,
-                            targetCategoryId = null,
-                            isProcessed = true
+                            filePath = photo.filePath,
+                            dateAdded = photo.dateAdded,
+                            isLiveCapture = false,
+                            photoTitle = photo.title,
+                            originalFileName = photo.fileName
                         )
+                        processingCoordinator.scanPhotoWithCloud(photo, targetFolderId)
                     } else {
-                        val visualAnalysis = LocalImageLabeler.analyze(app, photo.filePath)
-                        val hasFace = visualAnalysis.isPerson
-                        val ocrText = if ((visualAnalysis.isNature || visualAnalysis.isAnimal) && !visualAnalysis.hasTextOrDoc) "" else MlKitOcrEngine.recognizeText(app, photo.filePath)
-                        if (ocrText.isBlank() || ocrText.trim().length < 4) {
-                            val heuristic = SmartHeuristicParser.parse(
-                                scrubbedText = "",
-                                photoTitle = "${photo.folderId} ${photo.title}",
-                                hasFace = hasFace,
-                                visualLabels = visualAnalysis.rawLabels
-                            )
-                            val targetCatId = heuristic.targetCategoryId
-                            val categoryNames = repository.categories.value
-                                .filter { it.id == targetCatId }
-                                .joinToString(" ") { it.name }
-
-                            dbHelper.indexPhotoFts(
-                                photoId = photo.id,
-                                title = photo.title,
-                                scrubbedText = "",
-                                intent = heuristic.detectedIntent,
-                                categoryNames = categoryNames
-                            )
-                            val embedding = VectorSemanticSearchEngine.generateEmbedding(
-                                text = "${photo.folderId ?: ""} $categoryNames",
-                                title = photo.title,
-                                intent = heuristic.detectedIntent,
-                                categoryNames = if (categoryNames.isNotBlank()) listOf(categoryNames) else emptyList()
-                            )
-                            dbHelper.savePhotoVector(photo.id, embedding, heuristic.detectedIntent)
-
-                            repository.updatePhotoAiMetadata(
-                                photoId = photo.id,
-                                isScreenshot = true,
-                                piiScrubbedText = "",
-                                detectedIntent = heuristic.detectedIntent.takeIf { it != "OTHER" },
-                                suggestedEventTitle = heuristic.suggestedEventTitle.takeIf { heuristic.detectedIntent == "EVENT" },
-                                suggestedEventDateMillis = heuristic.suggestedEventDateMillis,
-                                targetCategoryId = targetCatId,
-                                isProcessed = true
-                            )
-                        } else {
-                            val piiResult = PiiScrubber.scrub(ocrText)
-                            val nowScan = System.currentTimeMillis()
-                            if (repository.canUseAiScan(nowScan)) {
-                                repository.incrementQuotaUsage(nowScan)
-                                dbHelper.enqueueScreenshot(
-                                    photoId = photo.id,
-                                    filePath = photo.filePath,
-                                    dateAdded = photo.dateAdded,
-                                    isLiveCapture = false,
-                                    photoTitle = photo.title,
-                                    originalFileName = photo.fileName
-                                )
-                                val parsed = CloudAiBackendClient.analyzeWithFallback(
-                                    context = app,
-                                    scrubbedText = piiResult.scrubbedText,
-                                    photoTitle = photo.title,
-                                    categories = repository.categories.value,
-                                    isPro = repository.accountTier.value.isPro,
-                                    hasFace = hasFace
-                                )
-                                val categoryNames = repository.categories.value
-                                    .filter { it.id == parsed.targetCategoryId }
-                                    .joinToString(" ") { it.name }
-
-                                dbHelper.indexPhotoFts(
-                                    photoId = photo.id,
-                                    title = photo.title,
-                                    scrubbedText = piiResult.scrubbedText,
-                                    intent = parsed.detectedIntent,
-                                    categoryNames = categoryNames
-                                )
-                                dbHelper.markQueueItemProcessed(photo.id, "COMPLETED")
-
-                                // Index in Vector Semantic Search (IDEA.md Part 3 & Step 6 - Pro Tier)
-                                val embedding = VectorSemanticSearchEngine.generateEmbedding(
-                                    text = "${targetFolderId ?: ""} ${piiResult.scrubbedText}",
-                                    title = photo.title,
-                                    intent = parsed.detectedIntent,
-                                    categoryNames = if (categoryNames.isNotBlank()) listOf(categoryNames) else emptyList(),
-                                    customCategories = repository.categories.value
-                                )
-                                dbHelper.savePhotoVector(photo.id, embedding, parsed.detectedIntent)
-
-                                dbHelper.recordProcessedScreenshot(
-                                    photoId = photo.id,
-                                    filePath = photo.filePath,
-                                    dateAdded = photo.dateAdded,
-                                    scrubbedText = piiResult.scrubbedText,
-                                    detectedIntent = parsed.detectedIntent,
-                                    eventTitle = parsed.suggestedEventTitle,
-                                    eventDateMillis = parsed.suggestedEventDateMillis,
-                                    targetCategoryId = parsed.targetCategoryId
-                                )
-
-                                repository.updatePhotoAiMetadata(
-                                    photoId = photo.id,
-                                    isScreenshot = true,
-                                    piiScrubbedText = piiResult.scrubbedText,
-                                    detectedIntent = parsed.detectedIntent,
-                                    suggestedEventTitle = parsed.suggestedEventTitle,
-                                    suggestedEventDateMillis = parsed.suggestedEventDateMillis,
-                                    targetCategoryId = parsed.targetCategoryId,
-                                    isProcessed = true
-                                )
-                            } else {
-                                // Graceful Degradation: Free user out of quota -> use deterministic SmartHeuristicParser on device
-                                val heuristic = SmartHeuristicParser.parse(
-                                    scrubbedText = piiResult.scrubbedText,
-                                    photoTitle = photo.title,
-                                    customCategories = repository.categories.value,
-                                    hasFace = hasFace
-                                )
-                                val categoryNames = repository.categories.value
-                                    .filter { it.id == heuristic.targetCategoryId }
-                                    .joinToString(" ") { it.name }
-
-                                dbHelper.indexPhotoFts(
-                                    photoId = photo.id,
-                                    title = photo.title,
-                                    scrubbedText = piiResult.scrubbedText,
-                                    intent = heuristic.detectedIntent,
-                                    categoryNames = categoryNames
-                                )
-                                val embedding = VectorSemanticSearchEngine.generateEmbedding(
-                                    text = "${targetFolderId ?: ""} ${piiResult.scrubbedText}",
-                                    title = photo.title,
-                                    intent = heuristic.detectedIntent,
-                                    categoryNames = if (categoryNames.isNotBlank()) listOf(categoryNames) else emptyList(),
-                                    customCategories = repository.categories.value
-                                )
-                                dbHelper.savePhotoVector(photo.id, embedding, heuristic.detectedIntent)
-
-                                repository.updatePhotoAiMetadata(
-                                    photoId = photo.id,
-                                    isScreenshot = true,
-                                    piiScrubbedText = piiResult.scrubbedText,
-                                    detectedIntent = heuristic.detectedIntent.takeIf { it != "OTHER" },
-                                    suggestedEventTitle = heuristic.suggestedEventTitle.takeIf { heuristic.detectedIntent == "EVENT" },
-                                    suggestedEventDateMillis = heuristic.suggestedEventDateMillis,
-                                    targetCategoryId = heuristic.targetCategoryId,
-                                    isProcessed = true
-                                )
-                            }
-                        }
+                        processingCoordinator.runOnDevicePipeline(photo, targetFolderId, targetCategoryIds)
                     }
                 }
             }
@@ -1326,7 +844,7 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
                 dbHelper.deletePhotoVector(p.id)
             }
             repository.batchDeletePhotos(photosToClean.map { it.id })
-            _agingMonitorInfo.value = AgingMonitorManager.getLastCheckedInfo(getApplication())
+            _agingMonitorInfo.value = AgingMonitorManager.getLastCheckedInfo(app)
         }
     }
 
@@ -1386,7 +904,6 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
                 // Ensure vector indexing completes completely before retroactive scanning to prevent race conditions
                 ensureVectorsIndexedSuspend(forceReindex = forceReindex)
 
-                val app = getApplication<Application>()
                 val apiKey = CloudAiConfigManager.getApiKey(app)
                 val photos = repository.photos.value
 
@@ -1544,8 +1061,6 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
     }
 
     private var searchJob: Job? = null
-    // Phase 3: In-memory cache for query neural embeddings to prevent redundant network calls
-    private val queryEmbeddingCache = java.util.concurrent.ConcurrentHashMap<String, FloatArray>()
 
     fun setSearchQuery(query: String) {
         searchJob?.cancel()
@@ -1560,155 +1075,16 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
             // Phase 3: Debounce typing by ~400ms to avoid firing heavy cloud requests on every keystroke
             kotlinx.coroutines.delay(400)
 
-            val parsedQuery = TemporalQueryParser.parse(trimmed)
-            val cleanQuery = parsedQuery.cleanTextQuery
-            val dateRange = parsedQuery.dateRangeMillis
-
-            // Phase 5: Privacy hardening - Scrub query of any phone, card, account, or email numbers before cloud
-            val scrubbedQuery = PiiScrubber.scrub(cleanQuery).scrubbedText
-
-            // 1. FTS5 BM25 Ranked keyword search (Phase 2 & 3: AND falling back to OR with column weights)
-            val ftsRankedList = if (cleanQuery.isNotBlank()) {
-                dbHelper.searchPhotosFtsRanked(cleanQuery)
-            } else emptyList()
-
-            val ftsIds = ftsRankedList.map { it.first }
-
-            val isPro = repository.accountTier.value.isPro
-            if (isPro) {
-                val app = getApplication<Application>()
-                val apiKey = CloudAiConfigManager.getApiKey(app)
-                val neuralVectors = dbHelper.getAllPhotoNeuralVectors()
-
-                // Phase 3: Pro cloud semantic embedding with RETRIEVAL_QUERY taskType and in-memory cache
-                var vectorRankedList: List<Pair<String, Float>> = emptyList()
-
-                if (apiKey.isNotBlank() && scrubbedQuery.isNotBlank() && neuralVectors.isNotEmpty()) {
-                    var queryNeuralVec = queryEmbeddingCache[scrubbedQuery]
-                    if (queryNeuralVec == null) {
-                        queryNeuralVec = CloudAiBackendClient.getEmbedding(
-                            text = scrubbedQuery,
-                            apiKey = apiKey,
-                            modelName = CloudAiConfigManager.DEFAULT_EMBEDDING_MODEL,
-                            taskType = "RETRIEVAL_QUERY"
-                        )
-                        if (queryNeuralVec != null) {
-                            queryEmbeddingCache[scrubbedQuery] = queryNeuralVec
-                        }
-                    }
-
-                    if (queryNeuralVec != null) {
-                        vectorRankedList = VectorSemanticSearchEngine.searchWithQueryVector(
-                            queryVector = queryNeuralVec,
-                            indexedVectors = neuralVectors,
-                            minSimilarity = 0.30f
-                        )
-                    }
-                }
-
-                // Fallback to on-device 128D vector engine if cloud neural embedding wasn't available / offline
-                if (vectorRankedList.isEmpty() && cleanQuery.isNotBlank()) {
-                    val allVectors = dbHelper.getAllPhotoVectors()
-                    val customCategories = repository.categories.value
-                    vectorRankedList = VectorSemanticSearchEngine.search(
-                        query = cleanQuery,
-                        indexedVectors = allVectors,
-                        customCategories = customCategories,
-                        minSimilarity = 0.25f
-                    )
-                }
-
-                // Phase 3: Reciprocal Rank Fusion (RRF) to merge keyword (BM25) and vector cosine similarity ranks
-                val k = 60.0
-                val allCandidateIds = (ftsIds + vectorRankedList.map { it.first }).distinct()
-
-                val ftsRankMap = ftsIds.withIndex().associate { it.value to it.index + 1 }
-                val vecRankMap = vectorRankedList.map { it.first }.withIndex().associate { it.value to it.index + 1 }
-
-                val rrfScores = mutableListOf<Pair<String, Double>>()
-                for (id in allCandidateIds) {
-                    val rFts = ftsRankMap[id]
-                    val rVec = vecRankMap[id]
-                    val ftsScorePart = if (rFts != null) 1.0 / (k + rFts) else 0.0
-                    val vecScorePart = if (rVec != null) 1.2 / (k + rVec) else 0.0
-                    val totalRrf = ftsScorePart + vecScorePart
-                    rrfScores.add(id to totalRrf)
-                }
-
-                val sortedRrf = rrfScores.sortedByDescending { it.second }
-
-                // Dynamic cutoff relative to top score (cut off at 35% of top result)
-                val topScore = sortedRrf.firstOrNull()?.second ?: 0.0
-                val cutoff = topScore * 0.35
-                val filteredRrf = sortedRrf.filter { it.second >= cutoff }
-
-                val finalMatchingIds = filteredRrf.map { it.first }.toSet()
-
-                // Normalize scores to [0.0..1.0] for UI badge
-                val maxRrf = if (topScore > 0.0) topScore else 1.0
-                val displayScores = filteredRrf.associate {
-                    it.first to (it.second / maxRrf).toFloat()
-                }
-                _semanticMatchScores.value = displayScores
-
-                repository.setSearchQuery(query, finalMatchingIds, dateRange = dateRange)
-            } else {
-                // Free Tier: FTS5 multi-term matching with BM25 ranking (no cloud quota cost)
-                _semanticMatchScores.value = emptyMap()
-                val finalMatchingIds = ftsIds.toSet()
-                repository.setSearchQuery(query, if (cleanQuery.isBlank() && dateRange != null) null else finalMatchingIds, dateRange = dateRange)
-            }
+            val result = searchCoordinator.search(query)
+            _semanticMatchScores.value = result.semanticMatchScores
+            repository.setSearchQuery(query, result.matchingIds, dateRange = result.dateRange)
         }
     }
 
     suspend fun ensureVectorsIndexedSuspend(forceReindex: Boolean = false) = withContext(Dispatchers.IO) {
-        val isPro = repository.accountTier.value.isPro
-        if (!isPro) return@withContext
-
         _isVectorIndexing.value = true
         try {
-            val app = getApplication<Application>()
-            val prefs = app.getSharedPreferences("vector_prefs", Context.MODE_PRIVATE)
-            val currentClusterVersion = prefs.getInt("vector_cluster_version", 0)
-            // Cluster version 6 cleans boilerplate text (folder names, template descriptions) from vector embeddings
-            val mustReindex = forceReindex || currentClusterVersion < 6
-
-            val allVectors = if (mustReindex) emptyMap() else dbHelper.getAllPhotoVectors()
-            val photos = repository.photos.value
-            val customCategories = repository.categories.value
-
-            for (p in photos) {
-                if (mustReindex || !allVectors.containsKey(p.id)) {
-                    val catNames = customCategories
-                        .filter { it.id in p.categoryIds }
-                        .map { it.name }
-                    val semanticTagsStr = p.semanticTags.joinToString(" ")
-                    val fullText = buildString {
-                        append(p.piiScrubbedText ?: p.description)
-                        if (!p.suggestedEventTitle.isNullOrBlank()) append(" ").append(p.suggestedEventTitle)
-                        if (semanticTagsStr.isNotBlank()) append(" ").append(semanticTagsStr)
-                    }.trim()
-
-                    val embedding = VectorSemanticSearchEngine.generateEmbedding(
-                        text = fullText,
-                        title = p.suggestedEventTitle ?: p.title,
-                        intent = p.detectedIntent ?: "",
-                        categoryNames = catNames,
-                        customCategories = customCategories
-                    )
-                    dbHelper.savePhotoVector(p.id, embedding, p.detectedIntent ?: "")
-                }
-            }
-
-            if (mustReindex) {
-                prefs.edit().putInt("vector_cluster_version", 6).apply()
-            }
-
-            // Phase 2: Backfill neural vectors on model version 1.0
-            val missingBackfill = dbHelper.getPhotosNeedingNeuralVectorBackfill("1.0")
-            if (missingBackfill.isNotEmpty()) {
-                com.example.test2.services.CloudUpgradeWorker.enqueue(app)
-            }
+            searchCoordinator.ensureVectorsIndexed(forceReindex)
         } finally {
             _isVectorIndexing.value = false
         }
@@ -1722,8 +1098,8 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
 
     fun runAgingScanNow() {
         viewModelScope.launch(Dispatchers.IO) {
-            AgingMonitorManager.checkAgingAndNotify(getApplication(), force = true)
-            _agingMonitorInfo.value = AgingMonitorManager.getLastCheckedInfo(getApplication())
+            AgingMonitorManager.checkAgingAndNotify(app, force = true)
+            _agingMonitorInfo.value = AgingMonitorManager.getLastCheckedInfo(app)
         }
     }
 
@@ -1737,13 +1113,12 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun saveCloudAiConfig(apiKey: String, modelName: String, customEndpoint: String, enabled: Boolean) {
-        CloudAiConfigManager.saveConfig(getApplication(), apiKey, modelName, customEndpoint, enabled)
-        _cloudAiConfig.value = CloudAiConfigManager.getConfig(getApplication())
+        CloudAiConfigManager.saveConfig(app, apiKey, modelName, customEndpoint, enabled)
+        _cloudAiConfig.value = CloudAiConfigManager.getConfig(app)
+    }
+
+    companion object {
+        private const val CURRENT_VECTOR_CLUSTER_VERSION = 6
+        private const val NEURAL_VECTOR_MODEL_VERSION = "1.0"
     }
 }
-
-data class RetroactiveCategoryPrompt(
-    val category: Category,
-    val matchingPhotoIds: List<String>,
-    val previewPhotos: List<Photo> = emptyList()
-)

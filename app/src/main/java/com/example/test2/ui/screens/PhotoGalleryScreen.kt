@@ -67,6 +67,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
+import com.example.test2.database.DefaultCategories
 import androidx.compose.ui.text.intl.Locale
 import androidx.compose.ui.text.intl.LocaleList
 import androidx.compose.ui.text.style.TextOverflow
@@ -1185,8 +1186,8 @@ fun PhotoBigPreviewCard(
                         fontSize = 11.sp,
                         color = Color(0xFF64748B)
                     )
-                    val isShopping = photo.detectedIntent == "SHOPPING" || photo.categoryIds.contains("cat_tobuy")
-                    val isEvent = photo.detectedIntent == "EVENT" || photo.categoryIds.contains("cat_events") || photo.suggestedEventDateMillis != null
+                    val isShopping = photo.detectedIntent == "SHOPPING" || photo.categoryIds.contains(DefaultCategories.TO_BUY)
+                    val isEvent = photo.detectedIntent == "EVENT" || photo.categoryIds.contains(DefaultCategories.EVENTS) || photo.suggestedEventDateMillis != null
                     val hasSchedule = isShopping || isEvent
                     if (hasSchedule) {
                         Icon(
@@ -1467,8 +1468,8 @@ fun PhotoListRowCard(
                             }
                         }
 
-                        val isShopping = photo.detectedIntent == "SHOPPING" || photo.categoryIds.contains("cat_tobuy")
-                        val isEvent = photo.detectedIntent == "EVENT" || photo.categoryIds.contains("cat_events") || photo.suggestedEventDateMillis != null
+                        val isShopping = photo.detectedIntent == "SHOPPING" || photo.categoryIds.contains(DefaultCategories.TO_BUY)
+                        val isEvent = photo.detectedIntent == "EVENT" || photo.categoryIds.contains(DefaultCategories.EVENTS) || photo.suggestedEventDateMillis != null
                         val hasSchedule = isShopping || isEvent
                         if (hasSchedule) {
                             Box(

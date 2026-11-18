@@ -4,6 +4,8 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import android.util.Log
+import com.example.test2.BuildConfig
 import com.example.test2.ai.VectorSemanticSearchEngine
 import com.example.test2.shared.models.ActionCard
 import com.example.test2.shared.models.ActionCardType
@@ -49,10 +51,50 @@ data class ProcessedScreenshotRecord(
     val itemsToBuy: String? = null
 )
 
+data class QueueStateUpdate(
+    val photoId: String,
+    val status: String,
+    val scrubbedText: String? = null,
+    val detectedIntent: String? = null,
+    val eventTitle: String? = null,
+    val eventDateMillis: Long? = null,
+    val targetCategoryId: String? = null,
+    val eventDescription: String? = null,
+    val summary: String? = null,
+    val tags: String? = null,
+    val entities: String? = null,
+    val itemsToBuy: String? = null,
+    val needsCloudUpgrade: Boolean = false,
+    val modelName: String? = null,
+    val modelVersion: String? = null
+)
+
+internal fun android.database.Cursor.toProcessedScreenshotRecord() = ProcessedScreenshotRecord(
+    photoId = getString(0),
+    filePath = getString(1),
+    scrubbedText = getString(2),
+    detectedIntent = getString(3),
+    eventTitle = getString(4),
+    eventDateMillis = if (isNull(5)) null else getLong(5),
+    targetCategoryId = getString(6),
+    eventDescription = if (columnCount > 7 && !isNull(7)) getString(7) else null,
+    summary = if (columnCount > 8 && !isNull(8)) getString(8) else null,
+    tags = if (columnCount > 9 && !isNull(9)) getString(9) else null,
+    entities = if (columnCount > 10 && !isNull(10)) getString(10) else null,
+    itemsToBuy = if (columnCount > 11 && !isNull(11)) getString(11) else null
+)
+
 class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
 
     companion object {
         const val DATABASE_NAME = "smart_photo_manager.db"
+
+        // DB Version History:
+        // 1-5: Initial schema (TABLE_QUEUE, TABLE_FTS)
+        // 6: Added TABLE_VECTORS (128D on-device embeddings)
+        // 7: Added TABLE_NEURAL_VECTORS (768D Gemini embeddings)
+        // 8: Added TABLE_ACTION_CARDS
+        // 9: Added semantic_tags column to TABLE_QUEUE
         const val DATABASE_VERSION = 9
 
         private const val TABLE_QUEUE = "screenshot_queue"
@@ -74,6 +116,12 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
     // Phase 3: In-memory vector caching to eliminate disk I/O and RAM reallocation on every keystroke
     private val neuralVectorCache = ConcurrentHashMap<String, FloatArray>()
     private val localVectorCache = ConcurrentHashMap<String, FloatArray>()
+
+    private fun logDebugError(message: String, error: Throwable) {
+        if (BuildConfig.DEBUG) {
+            Log.e("AppDatabaseHelper", message, error)
+        }
+    }
 
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
@@ -401,55 +449,10 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
 
     /**
      * Atomically claims the next PENDING queue item by setting its status to 'PROCESSING'.
-     * Prevents duplicate processing even when triggered concurrently by ContentObserver and JobScheduler.
+     * Delegates to [claimNextPendingQueueItems] with limit = 1 to prevent code duplication.
      */
     fun claimNextPendingQueueItem(): ScreenshotQueueItem? {
-        val db = writableDatabase
-        db.beginTransaction()
-        try {
-            var claimedItem: ScreenshotQueueItem? = null
-            db.rawQuery(
-                "SELECT id, photo_id, file_path, date_added, status, is_live_capture, scrubbed_text, photo_title, original_file_name FROM $TABLE_QUEUE WHERE status = 'PENDING' ORDER BY date_added ASC LIMIT 1",
-                null
-            ).use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val id = cursor.getLong(0)
-                    val photoId = cursor.getString(1)
-                    val filePath = cursor.getString(2)
-                    val dateAdded = cursor.getLong(3)
-                    val isLiveCapture = if (cursor.columnCount > 5) cursor.getInt(5) == 1 else false
-                    val scrubbedText = if (cursor.columnCount > 6) cursor.getString(6) else null
-                    val photoTitle = if (cursor.columnCount > 7) cursor.getString(7) else null
-                    val originalFileName = if (cursor.columnCount > 8) cursor.getString(8) else null
-                    val now = System.currentTimeMillis()
-
-                    val values = ContentValues().apply {
-                        put("status", "PROCESSING")
-                        put("updated_at", now)
-                    }
-                    val updated = db.update(TABLE_QUEUE, values, "id = ? AND status = 'PENDING'", arrayOf(id.toString()))
-                    if (updated > 0) {
-                        claimedItem = ScreenshotQueueItem(
-                            id = id,
-                            photoId = photoId,
-                            filePath = filePath,
-                            dateAdded = dateAdded,
-                            status = "PROCESSING",
-                            isLiveCapture = isLiveCapture,
-                            scrubbedText = scrubbedText,
-                            photoTitle = photoTitle,
-                            originalFileName = originalFileName
-                        )
-                    }
-                }
-            }
-            db.setTransactionSuccessful()
-            return claimedItem
-        } catch (_: Exception) {
-            return null
-        } finally {
-            db.endTransaction()
-        }
+        return claimNextPendingQueueItems(limit = 1).firstOrNull()
     }
 
     /**
@@ -462,6 +465,7 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
         try {
             val claimedItems = mutableListOf<ScreenshotQueueItem>()
             val safeLimit = limit.coerceIn(1, 20)
+            // Note: SQLite does not support ? parameter binding for the LIMIT clause, so coerced integer is interpolated safely.
             db.rawQuery(
                 "SELECT id, photo_id, file_path, date_added, status, is_live_capture, scrubbed_text, photo_title, original_file_name FROM $TABLE_QUEUE WHERE status = 'PENDING' ORDER BY date_added ASC LIMIT $safeLimit",
                 null
@@ -501,7 +505,8 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
             }
             db.setTransactionSuccessful()
             return claimedItems
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logDebugError("Failed to claim next pending items", e)
             return emptyList()
         } finally {
             db.endTransaction()
@@ -509,8 +514,36 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
     }
 
     /**
-     * Updates an item's state in the queue state machine:
-     * PENDING -> PROCESSING -> OCR_DONE -> CLOUD_DONE -> EMBEDDED -> COMPLETED
+     * Updates an item's state in the queue state machine using structured update object.
+     */
+    fun updateQueueItemState(update: QueueStateUpdate) {
+        try {
+            val db = writableDatabase
+            val values = ContentValues().apply {
+                put("status", update.status)
+                put("updated_at", System.currentTimeMillis())
+                if (update.scrubbedText != null) put("scrubbed_text", update.scrubbedText)
+                if (update.detectedIntent != null) put("detected_intent", update.detectedIntent)
+                if (update.eventTitle != null) put("event_title", update.eventTitle)
+                if (update.eventDateMillis != null) put("event_date_millis", update.eventDateMillis)
+                if (update.targetCategoryId != null) put("target_category_id", update.targetCategoryId)
+                if (update.eventDescription != null) put("event_description", update.eventDescription)
+                if (update.summary != null) put("summary", update.summary)
+                if (update.tags != null) put("tags", update.tags)
+                if (update.entities != null) put("entities", update.entities)
+                if (update.itemsToBuy != null) put("items_to_buy", update.itemsToBuy)
+                if (update.needsCloudUpgrade) put("needs_cloud_upgrade", 1) else put("needs_cloud_upgrade", 0)
+                if (update.modelName != null) put("model_name", update.modelName)
+                if (update.modelVersion != null) put("model_version", update.modelVersion)
+            }
+            db.update(TABLE_QUEUE, values, "photo_id = ?", arrayOf(update.photoId))
+        } catch (e: Exception) {
+            logDebugError("Failed to update queue item state for ${update.photoId}", e)
+        }
+    }
+
+    /**
+     * Overload for backward-compatibility with existing callers.
      */
     fun updateQueueItemState(
         photoId: String,
@@ -529,28 +562,25 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
         modelName: String? = null,
         modelVersion: String? = null
     ) {
-        try {
-            val db = writableDatabase
-            val values = ContentValues().apply {
-                put("status", status)
-                put("updated_at", System.currentTimeMillis())
-                if (scrubbedText != null) put("scrubbed_text", scrubbedText)
-                if (detectedIntent != null) put("detected_intent", detectedIntent)
-                if (eventTitle != null) put("event_title", eventTitle)
-                if (eventDateMillis != null) put("event_date_millis", eventDateMillis)
-                if (targetCategoryId != null) put("target_category_id", targetCategoryId)
-                if (eventDescription != null) put("event_description", eventDescription)
-                if (summary != null) put("summary", summary)
-                if (tags != null) put("tags", tags)
-                if (entities != null) put("entities", entities)
-                if (itemsToBuy != null) put("items_to_buy", itemsToBuy)
-                if (needsCloudUpgrade) put("needs_cloud_upgrade", 1) else put("needs_cloud_upgrade", 0)
-                if (modelName != null) put("model_name", modelName)
-                if (modelVersion != null) put("model_version", modelVersion)
-            }
-            db.update(TABLE_QUEUE, values, "photo_id = ?", arrayOf(photoId))
-        } catch (_: Exception) {
-        }
+        updateQueueItemState(
+            QueueStateUpdate(
+                photoId = photoId,
+                status = status,
+                scrubbedText = scrubbedText,
+                detectedIntent = detectedIntent,
+                eventTitle = eventTitle,
+                eventDateMillis = eventDateMillis,
+                targetCategoryId = targetCategoryId,
+                eventDescription = eventDescription,
+                summary = summary,
+                tags = tags,
+                entities = entities,
+                itemsToBuy = itemsToBuy,
+                needsCloudUpgrade = needsCloudUpgrade,
+                modelName = modelName,
+                modelVersion = modelVersion
+            )
+        )
     }
 
     fun getPendingQueue(): List<ScreenshotQueueItem> {
@@ -633,6 +663,10 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
         }
     }
 
+    fun markQueueItemProcessed(photoId: String, status: QueueStatus) {
+        markQueueItemProcessed(photoId, status.name)
+    }
+
     fun isScreenshotProcessedOrNotified(photoId: String): Boolean {
         return try {
             val db = readableDatabase
@@ -685,7 +719,8 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
                 put("updated_at", now)
             }
             db.insertWithOnConflict(TABLE_QUEUE, null, values, SQLiteDatabase.CONFLICT_REPLACE)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logDebugError("Failed to record processed screenshot $photoId", e)
         }
     }
 
@@ -696,24 +731,7 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
                 "SELECT photo_id, file_path, scrubbed_text, detected_intent, event_title, event_date_millis, target_category_id, event_description, summary, tags, entities, items_to_buy FROM $TABLE_QUEUE WHERE photo_id = ? AND status = 'COMPLETED'",
                 arrayOf(photoId)
             ).use { cursor ->
-                if (cursor.moveToFirst()) {
-                    ProcessedScreenshotRecord(
-                        photoId = cursor.getString(0),
-                        filePath = cursor.getString(1),
-                        scrubbedText = cursor.getString(2),
-                        detectedIntent = cursor.getString(3),
-                        eventTitle = cursor.getString(4),
-                        eventDateMillis = if (cursor.isNull(5)) null else cursor.getLong(5),
-                        targetCategoryId = cursor.getString(6),
-                        eventDescription = if (cursor.columnCount > 7 && !cursor.isNull(7)) cursor.getString(7) else null,
-                        summary = if (cursor.columnCount > 8 && !cursor.isNull(8)) cursor.getString(8) else null,
-                        tags = if (cursor.columnCount > 9 && !cursor.isNull(9)) cursor.getString(9) else null,
-                        entities = if (cursor.columnCount > 10 && !cursor.isNull(10)) cursor.getString(10) else null,
-                        itemsToBuy = if (cursor.columnCount > 11 && !cursor.isNull(11)) cursor.getString(11) else null
-                    )
-                } else {
-                    null
-                }
+                if (cursor.moveToFirst()) cursor.toProcessedScreenshotRecord() else null
             }
         } catch (_: Exception) {
             null
@@ -815,74 +833,47 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
                     db.execSQL("UPDATE $TABLE_NEURAL_VECTORS SET photo_id = ? WHERE photo_id = ?", arrayOf(newPhotoId, oldPhotoId))
                 } catch (_: Exception) {}
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logDebugError("Failed to migrate photo records from $oldPhotoId to $newPhotoId", e)
         }
     }
 
     fun getProcessedScreenshotsByIds(photoIds: List<String>): List<ProcessedScreenshotRecord> {
         if (photoIds.isEmpty()) return emptyList()
-        val results = mutableListOf<ProcessedScreenshotRecord>()
-        try {
+        return try {
             val db = readableDatabase
             val placeholders = photoIds.joinToString(",") { "?" }
             db.rawQuery(
                 "SELECT photo_id, file_path, scrubbed_text, detected_intent, event_title, event_date_millis, target_category_id, event_description, summary, tags, entities, items_to_buy FROM $TABLE_QUEUE WHERE photo_id IN ($placeholders) AND status = 'COMPLETED'",
                 photoIds.toTypedArray()
             ).use { cursor ->
-                while (cursor.moveToNext()) {
-                    results.add(
-                        ProcessedScreenshotRecord(
-                            photoId = cursor.getString(0),
-                            filePath = cursor.getString(1),
-                            scrubbedText = cursor.getString(2),
-                            detectedIntent = cursor.getString(3),
-                            eventTitle = cursor.getString(4),
-                            eventDateMillis = if (cursor.isNull(5)) null else cursor.getLong(5),
-                            targetCategoryId = cursor.getString(6),
-                            eventDescription = if (cursor.columnCount > 7 && !cursor.isNull(7)) cursor.getString(7) else null,
-                            summary = if (cursor.columnCount > 8 && !cursor.isNull(8)) cursor.getString(8) else null,
-                            tags = if (cursor.columnCount > 9 && !cursor.isNull(9)) cursor.getString(9) else null,
-                            entities = if (cursor.columnCount > 10 && !cursor.isNull(10)) cursor.getString(10) else null,
-                            itemsToBuy = if (cursor.columnCount > 11 && !cursor.isNull(11)) cursor.getString(11) else null
-                        )
-                    )
+                buildList {
+                    while (cursor.moveToNext()) {
+                        add(cursor.toProcessedScreenshotRecord())
+                    }
                 }
             }
         } catch (_: Exception) {
+            emptyList()
         }
-        return results
     }
 
     fun getAllCompletedProcessedScreenshots(): List<ProcessedScreenshotRecord> {
-        val results = mutableListOf<ProcessedScreenshotRecord>()
-        try {
+        return try {
             val db = readableDatabase
             db.rawQuery(
                 "SELECT photo_id, file_path, scrubbed_text, detected_intent, event_title, event_date_millis, target_category_id, event_description, summary, tags, entities, items_to_buy FROM $TABLE_QUEUE WHERE status = 'COMPLETED'",
                 null
             ).use { cursor ->
-                while (cursor.moveToNext()) {
-                    results.add(
-                        ProcessedScreenshotRecord(
-                            photoId = cursor.getString(0),
-                            filePath = cursor.getString(1),
-                            scrubbedText = cursor.getString(2),
-                            detectedIntent = cursor.getString(3),
-                            eventTitle = cursor.getString(4),
-                            eventDateMillis = if (cursor.isNull(5)) null else cursor.getLong(5),
-                            targetCategoryId = cursor.getString(6),
-                            eventDescription = if (cursor.columnCount > 7 && !cursor.isNull(7)) cursor.getString(7) else null,
-                            summary = if (cursor.columnCount > 8 && !cursor.isNull(8)) cursor.getString(8) else null,
-                            tags = if (cursor.columnCount > 9 && !cursor.isNull(9)) cursor.getString(9) else null,
-                            entities = if (cursor.columnCount > 10 && !cursor.isNull(10)) cursor.getString(10) else null,
-                            itemsToBuy = if (cursor.columnCount > 11 && !cursor.isNull(11)) cursor.getString(11) else null
-                        )
-                    )
+                buildList {
+                    while (cursor.moveToNext()) {
+                        add(cursor.toProcessedScreenshotRecord())
+                    }
                 }
             }
         } catch (_: Exception) {
+            emptyList()
         }
-        return results
     }
 
     // --- FTS5 Full-Text Search Operations (Phase 2 & 3: BM25 Weighted Multi-Column) ---
@@ -1066,7 +1057,8 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
                 put("updated_at", System.currentTimeMillis())
             }
             db.insertWithOnConflict(TABLE_VECTORS, null, values, SQLiteDatabase.CONFLICT_REPLACE) >= 0
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logDebugError("Failed to save photo vector for $photoId", e)
             false
         }
     }
@@ -1159,7 +1151,8 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
             }
             db.setTransactionSuccessful()
             return true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logDebugError("Failed to save photo neural vectors batch", e)
             return false
         } finally {
             db.endTransaction()
@@ -1246,7 +1239,8 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
             } finally {
                 db.endTransaction()
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logDebugError("Failed to save action cards", e)
         }
     }
 

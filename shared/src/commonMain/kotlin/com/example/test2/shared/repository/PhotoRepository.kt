@@ -422,66 +422,23 @@ class PhotoRepository(
         semanticTags: List<String> = emptyList(),
         isCloudEnriched: Boolean? = null
     ) {
-        _photos.value = _photos.value.map { photo ->
-            if (photo.id == photoId) {
-                // Cloud Data Precedence / Immutability Rule:
-                // If photo already has high-quality Cloud AI metadata (isCloudEnriched == true),
-                // do not allow lower-quality / empty heuristic updates to downgrade it.
-                val isAlreadyCloudEnriched = photo.isCloudEnriched
-                val willBeCloudEnriched = isCloudEnriched ?: (isAlreadyCloudEnriched || !suggestedEventDescription.isNullOrBlank())
-
-                val resolvedTitle = if (isAlreadyCloudEnriched && (suggestedEventTitle.isNullOrBlank() || isCrudeTitle(suggestedEventTitle))) {
-                    photo.suggestedEventTitle
-                } else {
-                    suggestedEventTitle ?: photo.suggestedEventTitle
-                }
-
-                val resolvedDescription = if (isAlreadyCloudEnriched && suggestedEventDescription.isNullOrBlank()) {
-                    photo.suggestedEventDescription
-                } else {
-                    suggestedEventDescription ?: photo.suggestedEventDescription
-                }
-
-                val resolvedIntent = if (isAlreadyCloudEnriched && (detectedIntent.isNullOrBlank() || detectedIntent == "OTHER")) {
-                    photo.detectedIntent
-                } else {
-                    detectedIntent ?: photo.detectedIntent
-                }
-
-                val defaultCatIds = setOf("cat_events", "cat_tobuy", "cat_reading", "cat_nature", "cat_personal")
-                val updatedCategories = if (targetCategoryId != null && (!isAlreadyCloudEnriched || targetCategoryId != "cat_other")) {
-                    (photo.categoryIds.filterNot { it in defaultCatIds } + targetCategoryId).toSet()
-                } else {
-                    photo.categoryIds
-                }
-
-                val mergedTags = if (semanticTags.isNotEmpty()) {
-                    (photo.semanticTags + semanticTags).distinct()
-                } else {
-                    photo.semanticTags
-                }
-
-                photo.copy(
+        updatePhotoAiMetadataBatch(
+            listOf(
+                PhotoAiMetadataUpdate(
+                    photoId = photoId,
                     isScreenshot = isScreenshot,
-                    isCloudEnriched = willBeCloudEnriched,
-                    piiScrubbedText = if (isAlreadyCloudEnriched && !photo.piiScrubbedText.isNullOrBlank() && piiScrubbedText.isNullOrBlank()) {
-                        photo.piiScrubbedText
-                    } else {
-                        piiScrubbedText ?: photo.piiScrubbedText
-                    },
-                    detectedIntent = resolvedIntent,
-                    suggestedEventTitle = resolvedTitle,
-                    suggestedEventDateMillis = suggestedEventDateMillis ?: photo.suggestedEventDateMillis,
-                    suggestedEventDescription = resolvedDescription,
-                    semanticTags = mergedTags,
-                    categoryIds = updatedCategories,
-                    isProcessed = isProcessed || photo.isProcessed
+                    piiScrubbedText = piiScrubbedText,
+                    detectedIntent = detectedIntent,
+                    suggestedEventTitle = suggestedEventTitle,
+                    suggestedEventDateMillis = suggestedEventDateMillis,
+                    targetCategoryId = targetCategoryId,
+                    isProcessed = isProcessed,
+                    suggestedEventDescription = suggestedEventDescription,
+                    semanticTags = semanticTags,
+                    isCloudEnriched = isCloudEnriched
                 )
-            } else {
-                photo
-            }
-        }
-        persistData()
+            )
+        )
     }
 
     fun updatePhotoAiMetadataBatch(updates: List<PhotoAiMetadataUpdate>) {

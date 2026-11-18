@@ -13,6 +13,7 @@ object DeviceAuthManager {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
         } else {
+            // Required for API < 30: BIOMETRIC_WEAK is needed for device credentials on Android 10 and lower
             @Suppress("DEPRECATION")
             BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL
         }
