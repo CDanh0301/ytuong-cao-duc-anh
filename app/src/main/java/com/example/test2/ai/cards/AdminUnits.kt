@@ -79,22 +79,25 @@ object AdminUnits {
      */
     fun detectCity(address: String): String {
         val lower = address.lowercase(Locale.getDefault())
+        // Ignore "Hà Nội" when it is part of the street name "Xa Lộ Hà Nội" in southern VN
+        val lowerWithoutStreet = lower.replace("xa lộ hà nội", "").replace("xa lo ha noi", "")
+
         // 1. Try legacy list first (guarantees backward compatibility for existing tests like "TP.HCM", "Hà Nội")
         for (city in LEGACY_VN_CITIES) {
             val cLower = city.lowercase(Locale.getDefault())
-            if (lower.contains(cLower)) {
+            if (lowerWithoutStreet.contains(cLower)) {
                 return city
             }
         }
 
         // 2. Try aliases in the 34 provinces list
-        val unacc = VietnameseUtils.removeDiacritics(lower)
+        val unacc = VietnameseUtils.removeDiacritics(lowerWithoutStreet)
         for (prov in PROVINCES) {
             for (alias in prov.aliases) {
                 val aLower = alias.lowercase(Locale.getDefault())
                 val aUnacc = VietnameseUtils.removeDiacritics(aLower)
-                if (Regex("""\b${Regex.escape(aLower)}\b""").containsMatchIn(lower) ||
-                    Regex("""\b${Regex.escape(aUnacc)}\b""").containsMatchIn(unacc)) {
+                if (Regex("""(?i)(?:^|[\s,;./\-]|\b)${Regex.escape(aLower)}(?:$|[\s,;./\-]|\b)""").containsMatchIn(lowerWithoutStreet) ||
+                    Regex("""(?i)(?:^|[\s,;./\-]|\b)${Regex.escape(aUnacc)}(?:$|[\s,;./\-]|\b)""").containsMatchIn(unacc)) {
                     return prov.officialName
                 }
             }
@@ -109,8 +112,8 @@ object AdminUnits {
         val lower = line.lowercase(Locale.getDefault())
         val unacc = VietnameseUtils.removeDiacritics(lower)
 
-        // Administrative keywords: Phường, Xã, Thị trấn, Quận, Huyện, Thị xã, Tỉnh, TP
-        if (Regex("""(?i)\b(?:phường|xã|thị\s*trấn|p\.|quận|huyện|thị\s*xã|q\.|tỉnh|thành\s*phố|tp\.|q\s*\d+)\b""").containsMatchIn(line)) {
+        // Administrative keywords: Phường, Xã, Thị trấn, Quận, Huyện, Thị xã, Tỉnh, TP, P., Q.
+        if (Regex("""(?i)(?:^|[\s,;./\-]|\b)(?:phường|xã|thị\s*trấn|quận|huyện|thị\s*xã|tỉnh|thành\s*phố|q\s*\d+|(?:p|q|tp)\.|\b(?:tp|q\s*\d+|p\s*\d+)\b)(?:$|[\s,;./\-]|\b)""").containsMatchIn(line)) {
             return true
         }
 
@@ -124,8 +127,8 @@ object AdminUnits {
             for (alias in prov.aliases) {
                 val aLower = alias.lowercase(Locale.getDefault())
                 val aUnacc = VietnameseUtils.removeDiacritics(aLower)
-                if (Regex("""\b${Regex.escape(aLower)}\b""").containsMatchIn(lower) ||
-                    Regex("""\b${Regex.escape(aUnacc)}\b""").containsMatchIn(unacc)) {
+                if (Regex("""(?i)(?:^|[\s,;./\-]|\b)${Regex.escape(aLower)}(?:$|[\s,;./\-]|\b)""").containsMatchIn(lower) ||
+                    Regex("""(?i)(?:^|[\s,;./\-]|\b)${Regex.escape(aUnacc)}(?:$|[\s,;./\-]|\b)""").containsMatchIn(unacc)) {
                     return true
                 }
             }

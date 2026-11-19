@@ -174,11 +174,8 @@ object ActionCardExtractorV2 {
         val contactCards = extractContactCards(photoId, rawOcrText, ocrLines)
         cards.addAll(contactCards)
 
-        // 4. Event
-        val eventCard = extractEventFromText(photoId, rawOcrText, photoTitle)
-        if (eventCard != null) {
-            cards.add(eventCard)
-        }
+        // 4. Event - Deprecated: Calendar events are managed exclusively via cat_events and Photo.suggestedEventDateMillis
+        // val eventCard = extractEventFromText(photoId, rawOcrText, photoTitle)
 
         val baseTime = System.currentTimeMillis()
         return cards.mapIndexed { index, card ->

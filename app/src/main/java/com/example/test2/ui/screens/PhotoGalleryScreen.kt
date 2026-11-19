@@ -398,7 +398,6 @@ fun PhotoGalleryScreen(
                 val addrCount = actionCardPhotoCounts[ActionCardType.ADDRESS] ?: 0
                 val payCount = actionCardPhotoCounts[ActionCardType.PAYMENT] ?: 0
                 val contactCount = actionCardPhotoCounts[ActionCardType.CONTACT] ?: 0
-                val eventCount = actionCardPhotoCounts[ActionCardType.EVENT] ?: 0
 
                 // 1. Tất cả ảnh Tab
                 ActionCardTabPill(
@@ -450,21 +449,6 @@ fun PhotoGalleryScreen(
                             onSelectActionCardType(ActionCardType.ALL)
                         } else {
                             onSelectActionCardType(ActionCardType.CONTACT)
-                        }
-                    }
-                )
-
-                // 5. 📅 Lịch hẹn Tab
-                ActionCardTabPill(
-                    label = "📅 Lịch hẹn",
-                    badgeCount = eventCount,
-                    color = Color(0xFF10B981),
-                    isActive = activeActionCardType == ActionCardType.EVENT,
-                    onClick = {
-                        if (activeActionCardType == ActionCardType.EVENT) {
-                            onSelectActionCardType(ActionCardType.ALL)
-                        } else {
-                            onSelectActionCardType(ActionCardType.EVENT)
                         }
                     }
                 )

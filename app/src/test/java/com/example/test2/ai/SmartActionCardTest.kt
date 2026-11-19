@@ -140,12 +140,12 @@ class SmartActionCardTest {
             photoTitle = "Lịch khám bệnh"
         )
 
-        val eventCard = cards.find { it.type == ActionCardType.EVENT }
-        assertNotNull("Should extract an EVENT ActionCard from appointment text", eventCard)
-        eventCard!!
+        // Event ActionCard is deprecated to prevent redundancy with cat_events
+        assertTrue("Event ActionCards should be deprecated in favor of cat_events", cards.none { it.type == ActionCardType.EVENT })
 
-        val payload = JSONObject(eventCard.payloadJson)
-        assertTrue("Start time millis should be parsed", payload.getLong("startTimeMillis") > 0)
+        // But SmartHeuristicParser still captures date/time for the native calendar capability
+        val parsed = SmartHeuristicParser.parse(ocrText, "Lịch khám bệnh")
+        assertTrue("Start time millis should be parsed by parser", (parsed.suggestedEventDateMillis ?: 0L) > 0)
     }
 
     @Test
@@ -412,12 +412,11 @@ class SmartActionCardTest {
             photoTitle = "Hội thảo GenAI"
         )
 
-        val eventCard = cards.find { it.type == ActionCardType.EVENT }
-        assertNotNull("Should extract EVENT card with broad keyword 'Hội thảo'", eventCard)
-        eventCard!!
+        // Event ActionCard is deprecated to prevent redundancy with cat_events
+        assertTrue("Event ActionCards should be deprecated in favor of cat_events", cards.none { it.type == ActionCardType.EVENT })
 
-        val payload = JSONObject(eventCard.payloadJson)
-        assertTrue("Event date should be parsed", payload.getLong("startTimeMillis") > 0)
+        val parsed = SmartHeuristicParser.parse(ocrText, "Hội thảo GenAI")
+        assertTrue("Event date should be parsed by parser", (parsed.suggestedEventDateMillis ?: 0L) > 0)
     }
 
     @Test

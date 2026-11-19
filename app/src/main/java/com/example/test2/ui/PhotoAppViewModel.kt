@@ -212,6 +212,7 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
 
     fun refreshActionCardCounts() {
         viewModelScope.launch(Dispatchers.IO) {
+            dbHelper.cleanOrphanedActionCards()
             val counts = dbHelper.getActionCardsPhotoCountByType()
             _actionCardPhotoCounts.value = counts
         }
@@ -659,6 +660,18 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
 
                 processingCoordinator.runOnDevicePipeline(photo)
             } else if (!photo.piiScrubbedText.isNullOrBlank()) {
+                val scrubbed = photo.piiScrubbedText ?: ""
+                // Ensure action cards are populated for screenshots with OCR
+                if (photo.isScreenshot && scrubbed.isNotBlank() && dbHelper.getActionCardsForPhoto(photo.id).isEmpty()) {
+                    val cards = com.example.test2.ai.LocalActionCardExtractor.extractCardsFromText(
+                        photoId = photo.id,
+                        rawOcrText = scrubbed,
+                        photoTitle = photo.title
+                    )
+                    if (cards.isNotEmpty()) {
+                        dbHelper.replaceActionCardsForPhoto(photo.id, cards)
+                    }
+                }
                 // Keep FTS updated for previously processed photos
                 val categoryNames = repository.categories.value
                     .filter { it.id in photo.categoryIds }
@@ -672,6 +685,7 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
                 )
             }
         }
+        refreshActionCardCounts()
     }
 
     fun setActiveTab(tab: AppTab) {
@@ -844,8 +858,10 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
                 }
                 dbHelper.removePhotoFts(p.id)
                 dbHelper.deletePhotoVector(p.id)
+                dbHelper.deleteActionCardsForPhoto(p.id)
             }
             repository.batchDeletePhotos(photosToClean.map { it.id })
+            refreshActionCardCounts()
             _agingMonitorInfo.value = AgingMonitorManager.getLastCheckedInfo(app)
         }
     }
@@ -1025,7 +1041,9 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
             }
             dbHelper.removePhotoFts(photo.id)
             dbHelper.deletePhotoVector(photo.id)
+            dbHelper.deleteActionCardsForPhoto(photo.id)
             repository.deletePhoto(photo.id)
+            refreshActionCardCounts()
             if (_viewingPhotoId.value == photo.id) {
                 _viewingPhotoId.value = null
             }
@@ -1083,13 +1101,13 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
     private fun checkAndReextractCardsIfOld(photoId: String) {
         viewModelScope.launch(Dispatchers.IO) {
             val existing = dbHelper.getActionCardsForPhoto(photoId)
-            val hasLegacyCards = existing.any { card ->
+            val needsExtraction = existing.isEmpty() || existing.any { card ->
                 val ev = try {
                     org.json.JSONObject(card.payloadJson).optInt("ev", 1)
                 } catch (_: Exception) { 1 }
                 ev < com.example.test2.ai.cards.CardIds.EXTRACTOR_VERSION
             }
-            if (hasLegacyCards) {
+            if (needsExtraction) {
                 val photo = repository.photos.value.find { it.id == photoId } ?: return@launch
                 val result = com.example.test2.ai.OnDeviceAnalysis.analyze(
                     context = app,

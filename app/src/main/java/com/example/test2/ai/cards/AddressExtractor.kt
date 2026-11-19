@@ -28,11 +28,13 @@ object AddressExtractor {
         "phút trước", "phut truoc", "giờ trước", "gio truoc", "chia sẻ", "chia se"
     )
 
-    private val HOUSE_NO_REGEX = Regex("""\b\d+[a-zA-Z]?(?:/\d+[a-zA-Z]?)*\s+[A-ZÀ-Ỹa-zà-ỹ0-9]""")
-    private val ALLEY_REGEX = Regex("""(?i)\b(?:ngõ|ngách|hẻm|kiệt)\s*\d+""")
-    private val STREET_REGEX = Regex("""(?i)\b(?:đường|phố|duong|pho)\s+[A-ZÀ-Ỹ0-9]""")
-    private val BUILDING_REGEX = Regex("""(?i)\b(?:toà\s*nhà|tòa\s*nhà|tầng\s*\d+|kđt|chung\s*cư|residence|tower|plaza|building)\s+[A-Z0-9À-Ỹ]""")
-    private val LABEL_REGEX = Regex("""(?i)\b(?:địa\s*chỉ|dia\s*chi|đc|dc|address|location|cơ\s*sở|chi\s*nhánh)\s*[:=.-]?""")
+    private val HOUSE_NO_REGEX = Regex("""(?:^|[\s,;./\-]|\b)\d+[a-zA-Z]?(?:[-/]\d+[a-zA-Z]?)*(?:\s*,\s*|\s+)[A-ZÀ-Ỹa-zà-ỹ0-9]""")
+    private val ALLEY_REGEX = Regex("""(?i)(?:^|[\s,;./\-]|\b)(?:ngõ|ngách|hẻm|kiệt|k\s*\.?\s*)\s*\d+""")
+    private val STREET_REGEX = Regex("""(?i)(?:^|[\s,;./\-]|\b)(?:[đĐdD]ường|[pP]hố|duong|pho)\s+[A-ZÀ-Ỹa-zà-ỹ0-9]""")
+    private val BUILDING_REGEX = Regex(
+        """(?i)(?:^|[\s,;./\-]|\b)(?:toà\s*nhà|tòa\s*nhà|tòa|toà|tầng\s*(?:l\d+|b\d+|\d+|g|m|trệt|lửng)|level\s*\d+|floor\s*\d+|kđt|chung\s*cư|residence|tower|plaza|building|center|mall|vincom|lotte|aeon|crescent|landmark|keangnam|tttm|trung\s*tâm\s*thương\s*mại|siêu\s*thị|chợ|gian\s*hàng|gh\s*-\s*[a-z0-9\-]+|lô\s+[a-z0-9\-]+|kiosk\s*[a-z0-9\-]+|shophouse|căn\s*(?:hộ)?\s*[a-z0-9\-]+)(?:$|[\s,;./\-]|\b)"""
+    )
+    private val LABEL_REGEX = Regex("""(?i)(?:^|[\s,;./\-]|\b)(?:[đĐdD]ịa\s*chỉ|dia\s*chi|[đĐdD]c|dc|address|location|cơ\s*sở|chi\s*nhánh)\s*[:=.-]?""")
 
     private val PLACE_PREFIXES = listOf(
         "quán", "cửa hàng", "nhà hàng", "tiệm", "cafe", "cà phê", "phê la",
@@ -66,9 +68,14 @@ object AddressExtractor {
             // Skip lines with negative noise words
             if (NEGATIVE_WORDS.any { lowerLine.contains(it) }) continue
 
-            if (AdminUnits.hasAdminAnchor(line)) {
-                // Found an anchor at line i. Build window upwards
+            val combinedWithPrev = if (i > 0) "${lines[i - 1]} $line" else line
+            val hasAnchor = AdminUnits.hasAdminAnchor(line) || (i > 0 && AdminUnits.hasAdminAnchor(combinedWithPrev))
+
+            if (hasAnchor) {
+                // Found an anchor at line i (or combined line i-1 and i). Build window upwards
                 var bottomIdx = i
+                val anchorStartLine = if (!AdminUnits.hasAdminAnchor(line) && i > 0) i - 1 else i
+
                 // Check if line i+1 is a standalone province name (e.g. "Hà Nội" on next line)
                 if (i + 1 < lines.size) {
                     val nextLine = lines[i + 1]
@@ -80,11 +87,11 @@ object AddressExtractor {
                 }
 
                 val windowParts = mutableListOf<String>()
-                var topIdx = i
+                var topIdx = anchorStartLine
 
                 // Walk upwards up to 3 lines
                 for (step in 0..3) {
-                    val candidateIdx = i - step
+                    val candidateIdx = anchorStartLine - step
                     if (candidateIdx < 0) break
 
                     val curLine = lines[candidateIdx]
@@ -94,7 +101,7 @@ object AddressExtractor {
 
                     // Stop if we hit a different block in structured OCR
                     if (ocrLines != null && ocrLines.size == lines.size) {
-                        if (candidateIdx < i && ocrLines[candidateIdx].blockId != ocrLines[i].blockId) {
+                        if (candidateIdx < anchorStartLine && ocrLines[candidateIdx].blockId != ocrLines[anchorStartLine].blockId) {
                             break
                         }
                     }
@@ -113,7 +120,7 @@ object AddressExtractor {
                     windowParts.add(lines[idx])
                 }
 
-                val reconstructed = windowParts.joinToString(", ")
+                val reconstructed = reconstructAddressWindow(windowParts)
                 val cleanAddr = cleanAddressPrefix(reconstructed)
 
                 // Validation criteria:
@@ -145,12 +152,22 @@ object AddressExtractor {
         )
     }
 
+    private fun hasMultiAdminWithStreet(text: String): Boolean {
+        val lower = text.lowercase(Locale.getDefault())
+        val hasDistrict = AdminUnits.KNOWN_DISTRICTS.any { lower.contains(it.lowercase(Locale.getDefault())) } ||
+                Regex("""(?i)(?:^|[\s,;./\-]|\b)(?:quận|huyện|thị\s*xã|q\.|q\s*\d+)(?:$|[\s,;./\-]|\b)""").containsMatchIn(lower)
+        val hasCity = AdminUnits.detectCity(text).isNotBlank()
+        val segments = text.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        return hasDistrict && hasCity && segments.size >= 3
+    }
+
     private fun hasAddressComponent(line: String): Boolean {
         return HOUSE_NO_REGEX.containsMatchIn(line) ||
                 ALLEY_REGEX.containsMatchIn(line) ||
                 STREET_REGEX.containsMatchIn(line) ||
                 BUILDING_REGEX.containsMatchIn(line) ||
-                LABEL_REGEX.containsMatchIn(line)
+                LABEL_REGEX.containsMatchIn(line) ||
+                hasMultiAdminWithStreet(line)
     }
 
     private fun isValidAddress(text: String): Boolean {
@@ -167,7 +184,8 @@ object AddressExtractor {
                 ALLEY_REGEX.containsMatchIn(text) ||
                 STREET_REGEX.containsMatchIn(text) ||
                 BUILDING_REGEX.containsMatchIn(text) ||
-                (LABEL_REGEX.containsMatchIn(text) && text.any { it.isDigit() })
+                (LABEL_REGEX.containsMatchIn(text) && text.any { it.isDigit() }) ||
+                hasMultiAdminWithStreet(text)
 
         if (!hasSpecificComponent) return false
 
@@ -186,13 +204,51 @@ object AddressExtractor {
         if (BUILDING_REGEX.containsMatchIn(text)) score += 2
         if (AdminUnits.hasAdminAnchor(text)) score += 3
         if (AdminUnits.detectCity(text).isNotBlank()) score += 2
+        if (hasMultiAdminWithStreet(text)) score += 2
         return score
+    }
+
+    private fun reconstructAddressWindow(parts: List<String>): String {
+        if (parts.isEmpty()) return ""
+        val sb = StringBuilder(parts[0].trim())
+        for (k in 1 until parts.size) {
+            val prev = parts[k - 1].trim()
+            val cur = parts[k].trim()
+            if (prev.endsWith(",") || prev.endsWith(";")) {
+                sb.append(" ").append(cur)
+            } else if (isWordWrapContinuation(prev, cur)) {
+                sb.append(" ").append(cur)
+            } else {
+                sb.append(", ").append(cur)
+            }
+        }
+        return sb.toString()
+    }
+
+    private fun isWordWrapContinuation(prev: String, cur: String): Boolean {
+        if (prev.endsWith(",") || prev.endsWith(".")) return false
+        val lastWord = prev.split(Regex("""[,\s]+""")).lastOrNull() ?: ""
+        val combined = "$lastWord $cur"
+        if (AdminUnits.detectCity(combined).isNotBlank() || AdminUnits.hasAdminAnchor(combined)) {
+            return true
+        }
+        // If cur is a pure number (like zip code 100000), it's not a word continuation
+        if (cur.all { it.isDigit() }) return false
+
+        // If cur is a short continuation token without commas
+        if (cur.split(" ").size <= 2 && cur.length <= 15 && !cur.contains(",")) {
+            return true
+        }
+        return false
     }
 
     private fun cleanAddressPrefix(line: String): String {
         return line
             .replace(Regex("""^[📍•\-\*]\s*"""), "")
             .replace(Regex("""^(?:địa\s*chỉ|dia\s*chi|location|address|add|ở|o|tại|tai|đc|dc)\s*[:=.-]?\s*""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex(""",\s*,"""), ",")
+            .replace(Regex("""\s+,\s*"""), ", ")
+            .replace(Regex("""(?:[,\s]+)\b\d{5,6}\b$"""), "")
             .trim()
     }
 

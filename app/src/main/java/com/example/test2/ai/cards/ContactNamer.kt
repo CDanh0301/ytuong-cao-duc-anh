@@ -7,7 +7,7 @@ object ContactNamer {
 
     // Explicit name labels with word boundaries for short tokens
     private val EXPLICIT_NAME_LABEL_REGEX = Regex(
-        """(?iu)(?:họ\s*(?:và\s*)?tên|ho\s*(?:va\s*)?ten|người\s*liên\s*hệ|nguoi\s*lien\s*he|người\s*nhận|nguoi\s*nhan|liên\s*hệ|lien\s*he|contact(?:\s*person)?|\b(?:mr|ms|mrs|anh|chị|cô|chú)\b)\s*[:=.-]?\s*([^\n\r,;|]+)"""
+        """(?i)(?:^|[\s,;./\-]|\b)(?:họ\s*(?:và\s*)?tên|ho\s*(?:va\s*)?ten|người\s*liên\s*hệ|nguoi\s*lien\s*he|người\s*nhận|nguoi\s*nhan|liên\s*hệ|lien\s*he|contact(?:\s*person)?|\b(?:mr|ms|mrs|anh|chị|cô|chú)\b)\s*[:=.-]?\s*([^\n\r,;|]+)"""
     )
 
     // Functional service labels that should NEVER be treated as a person's name

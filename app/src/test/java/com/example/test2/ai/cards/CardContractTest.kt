@@ -35,18 +35,17 @@ class CardContractTest {
             photoTitle = "Screenshot_2026"
         )
 
-        assertTrue("Should extract multiple cards", cards.size >= 4)
+        assertTrue("Should extract multiple cards", cards.size >= 3)
 
-        // Strict ordering: PAYMENT -> ADDRESS -> CONTACT -> EVENT
+        // Strict ordering: PAYMENT -> ADDRESS -> CONTACT (EVENT card deprecated per system spec)
         val types = cards.map { it.type }
         val paymentIdx = types.indexOf(ActionCardType.PAYMENT)
         val addressIdx = types.indexOf(ActionCardType.ADDRESS)
         val contactIdx = types.indexOf(ActionCardType.CONTACT)
-        val eventIdx = types.indexOf(ActionCardType.EVENT)
 
         assertTrue("Payment must come before Address", paymentIdx < addressIdx)
         assertTrue("Address must come before Contact", addressIdx < contactIdx)
-        assertTrue("Contact must come before Event", contactIdx < eventIdx)
+        assertTrue("Event cards must be deprecated in favor of cat_events", cards.none { it.type == ActionCardType.EVENT })
 
         // Contract checks for PAYMENT
         val payCard = cards[paymentIdx]
@@ -81,13 +80,7 @@ class CardContractTest {
         assertEquals("0912345678", contactJson.getString("phoneNumber"))
         assertEquals(2, contactJson.optInt("ev"))
 
-        // Contract checks for EVENT
-        val eventCard = cards[eventIdx]
-        val eventJson = JSONObject(eventCard.payloadJson)
-        assertTrue(eventJson.has("title"))
-        assertTrue(eventJson.has("startTimeMillis"))
-        assertTrue(eventJson.has("description"))
-        assertTrue(eventCard.title.startsWith("📅"))
-        assertEquals(2, eventJson.optInt("ev"))
+        // Contract verification that EVENT cards are omitted per user spec
+        assertTrue("No EVENT card in result list", cards.none { it.type == ActionCardType.EVENT })
     }
 }

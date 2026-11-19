@@ -1362,4 +1362,13 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
             false
         }
     }
+
+    fun cleanOrphanedActionCards(validPhotoIds: Set<String>? = null) {
+        try {
+            val db = writableDatabase
+            // Always purge any EVENT cards to enforce calendar deprecation
+            db.delete(TABLE_ACTION_CARDS, "type = ?", arrayOf("EVENT"))
+        } catch (_: Exception) {
+        }
+    }
 }
