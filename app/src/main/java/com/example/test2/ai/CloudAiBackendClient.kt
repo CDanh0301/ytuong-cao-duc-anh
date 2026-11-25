@@ -95,17 +95,31 @@ object CloudAiBackendClient {
 
         try {
             GeminiRateLimiter.acquire()
-            val result = callGeminiApi(
-                apiKey = config.apiKey,
-                modelName = config.modelName,
-                customEndpoint = config.customEndpoint,
-                scrubbedText = scrubbedText,
-                photoTitle = photoTitle,
-                categories = categories,
-                isPro = isPro,
-                hasFace = hasFace,
-                visualLabels = visualLabels
-            )
+            var result: ParsedScreenshotData? = null
+            for (attempt in 0..1) {
+                try {
+                    result = callGeminiApi(
+                        apiKey = config.apiKey,
+                        modelName = config.modelName,
+                        customEndpoint = config.customEndpoint,
+                        scrubbedText = scrubbedText,
+                        photoTitle = photoTitle,
+                        categories = categories,
+                        isPro = isPro,
+                        hasFace = hasFace,
+                        visualLabels = visualLabels
+                    )
+                    break
+                } catch (e: Exception) {
+                    if (e.message?.contains("429") == true && attempt == 0) {
+                        android.util.Log.w("CloudAiBackendClient", "Rate limit 429 encountered during single scan. Backing off 2.5s before retry...")
+                        delay(2500L)
+                        continue
+                    } else {
+                        throw e
+                    }
+                }
+            }
             result ?: SmartHeuristicParser.parse(
                 scrubbedText = scrubbedText,
                 photoTitle = photoTitle,
@@ -368,10 +382,10 @@ object CloudAiBackendClient {
         val specificInstructions = if (isBatch) {
             """
         - For SHOPPING (BATCH):
-          * CRITICAL RULE: You MUST classify intent as 'SHOPPING' and 'target_category_id' as 'cat_tobuy' IF AND ONLY IF the screenshot demonstrates genuine retail/e-commerce commercial intent (e.g., online store product page, shopping cart, checkout order, or retail purchase receipt/invoice).
-          * 'suggested_event_title' MUST be the exact, complete product name and brand (e.g., 'Google Tivi Sony True RGB BRAVIA 7 II 98' or 'Nồi cơm nắp gài BlueStone 1.8 lít RCB-5527').
-          * In 'entities', you MUST extract 'product' (exact product name) and 'merchant' (store/platform). Mentions of consultation/examination fees in medical schedules or tuition in school timetables DO NOT make it shopping!
-          * 'suggested_event_description' MUST be a clean, concise 1-2 sentence description in Vietnamese summarizing the product, key specs, and price, or null.
+          * CRITICAL RULE: You MUST classify intent as 'SHOPPING' and 'target_category_id' as 'cat_tobuy' if the screenshot demonstrates retail shopping, e-commerce, commercial services, dining places, restaurants, cafes, food menus, or Google Maps venue cards.
+          * 'suggested_event_title' MUST be the exact product name or restaurant/venue name (e.g., 'Tung\'s Kitchen Vietnamese Cuisine', 'Moo Beef Steak Trần Quốc Toản', or 'Nồi cơm nắp gài BlueStone 1.8 lít RCB-5527').
+          * In 'entities', extract 'merchant' (store/platform/restaurant name), 'product' (product/dish/service name), and 'place' (address/location). Mentions of consultation/examination fees in medical schedules or tuition in school timetables DO NOT make it shopping!
+          * 'suggested_event_description' MUST be a clean, concise 1-2 sentence description in Vietnamese summarizing the product or venue, key specs/cuisine, and price, or null.
         - For EVENT (BATCH):
           * CRITICAL RULE: You MUST classify intent as 'EVENT' and 'target_category_id' as 'cat_events' IF AND ONLY IF the document conveys a specific timetable, schedule, shift roster, appointment, flight, or calendar event.
           * In 'entities', you MUST extract 'datetime' (specific date/time) or 'place' (hospital, clinic, room, cinema, airport, or meeting platform). General news articles, editorials, weather reports, or chat messages talking about dates DO NOT qualify as events!
@@ -385,14 +399,14 @@ object CloudAiBackendClient {
         } else {
             """
         - For SHOPPING:
-          * 'suggested_event_title' MUST be the exact, complete product name and brand (e.g., 'Google Tivi Sony True RGB BRAVIA 7 II 98' or 'Nồi cơm nắp gài BlueStone 1.8 lít RCB-5527').
+          * 'suggested_event_title' MUST be the exact, complete product name or restaurant/venue name (e.g., 'Tung\'s Kitchen Vietnamese Cuisine' or 'Google Tivi Sony True RGB BRAVIA 7 II 98').
           * 'suggested_event_description' MUST be a comprehensive, well-structured, fluent description in Vietnamese. NEVER leave it null or empty for shopping. Each bullet point MUST be a complete, meaningful sentence/phrase without truncation:
             🛒 Lịch mua sắm & Chi tiêu:
-            • Sản phẩm: [Tên sản phẩm đầy đủ và thương hiệu]
-            • Thông số & Đặc điểm: [Thông số kỹ thuật chính: kích thước màn hình, độ phân giải, công nghệ, công suất/dung tích. TUYỆT ĐỐI KHÔNG đưa chính sách vận chuyển hoặc đổi trả vào mục này]
+            • Tên / Thương hiệu: [Tên sản phẩm đầy đủ hoặc tên nhà hàng/quán cafe]
+            • Thông số / Ẩm thực / Đặc điểm: [Thông số kỹ thuật chính hoặc loại hình ẩm thực, món ăn nổi bật]
             • Mức giá & Ưu đãi: [Mức giá chính xác, thông tin khuyến mãi/quà tặng nếu có]
-            • Nơi bán & Khu vực: [Tên cửa hàng, sàn TMĐT hoặc khu vực giao hàng hoàn chỉnh]
-            • Ghi chú: Đặt lịch nhắc nhở mua sắm từ ảnh chụp màn hình.
+            • Nơi bán / Địa chỉ: [Tên cửa hàng, sàn TMĐT hoặc địa chỉ quán hoàn chỉnh]
+            • Ghi chú: Ghi chú nhắc nhở mua sắm, địa điểm từ ảnh chụp màn hình.
         - For EVENT:
           * 'suggested_event_title' MUST be the specific, complete title of the event, movie, or meeting (e.g., 'Lịch chiếu phim Lotte Cinema').
           * 'suggested_event_description' MUST be a comprehensive, well-structured, fluent description in Vietnamese:
@@ -420,14 +434,16 @@ object CloudAiBackendClient {
            - Applies to any document whose primary purpose is to convey a schedule, timetable, or event.
            - Includes: Hospital/clinic examination schedules, doctor shift rosters, school/university class timetables, movie showtimes, concert/theater tickets, flight itineraries, boarding passes, webinars, calendar appointments, meeting invites.
            - CRITICAL: Mentions of personnel names (doctors, professors, speakers, staff), room numbers, or fees/co-pays (BHYT, tuition, consultation fees) are normal structural elements of timetables and DO NOT make the document a personal ID card or a shopping product! Classify intent as 'EVENT' and target_category_id as 'cat_events'.
-        2. Retail Products & Shopping (cat_tobuy):
-           - Applies to e-commerce store listings (Shopee, Lazada, Tiki, Amazon, TikTok Shop, etc.), product detail showcases, shopping carts, checkout orders, purchase receipts, or retail invoices.
-           - CRITICAL: Must exhibit genuine commercial intent (selling or buying goods). Mentions of location/street names (e.g., 'Trần Bình', 'Hà Nội') or administrative/consultation fees in schedules DO NOT make it shopping! NEVER classify timetables or schedules as cat_tobuy!
+        2. Commercial Goods, Venues, Dining & Services (cat_tobuy):
+           - Applies to online e-commerce (Shopee, Lazada, Tiki, Amazon, TikTok Shop, etc.), physical retail stores, supermarkets, restaurants, eateries, cafes, bars, food stalls, hotels, spas, salons, and Google Maps place cards.
+           - CRITICAL RULE: For any commercial merchant, eatery, or store: operating/business hours (e.g., 'Mở cửa 10:00 - 22:30', 'Đóng cửa vào 14:00 Mở lại vào 17:30'), menus, dish prices ('100.000 - 300.000 đ/người'), customer ratings/reviews ('4,9 ★', 'Bài đánh giá'), and map interaction buttons ('Đặt bàn', 'Xem thực đơn', 'Gọi điện', 'Chỉ đường') are commercial metadata -> ALWAYS classify intent as 'SHOPPING' and 'target_category_id' as 'cat_tobuy'.
+           - Mentions of location/street names: When attached to a commercial merchant, store, eatery, or business, the address is a core commercial attribute and belongs to 'cat_tobuy'. However, mentions of administrative fees, consultation fees, or room addresses in clinic/school timetables DO NOT make it shopping: NEVER classify timetables or schedules as cat_tobuy!
+           - EXCEPTION: Only classify as 'cat_events' if it is a confirmed reservation ticket with explicit booking date/time in the future.
         3. Personal Identity & Documents (cat_personal):
            - Applies to official personal identity credentials (CCCD, CMND, passport, driver's license, employee/student ID card, certificates, resumes, CVs) or prominent personal portrait photos/selfies/family albums.
            - CRITICAL: Staff duty rosters, doctor examination timetables, school class schedules, or hospital reception notices containing people's names or BHYT notes are NOT personal ID documents! Classify intent as 'OTHER' or 'PERSONAL', set 'target_category_id' to 'cat_personal', and set 'event_date_millis' to null and 'suggested_event_title' to null.
         4. Reading, News & Articles (cat_reading):
-           - Applies to news articles, journalism press reports, traffic/weather updates, sports news, blog posts, editorials, or book chapters.
+           - Applies to news articles, journalism press reports, traffic/weather updates, sports news, blog posts, editorials, or book chapters. Customer reviews or ratings on a store or dining location card DO NOT make it reading!
         5. Nature & Scenery (cat_nature):
            - STRICTLY for genuine outdoor nature, mountains, landscapes, hills, forests, lakes, rivers, beaches, scenic views, or wallpaper photography (e.g. National Geographic, Pexels, Unsplash).
         6. Support Vietnamese and English equally (e.g., 'lịch khám', 'bác sĩ', 'lịch làm việc', 'thời khóa biểu', 'chân dung', 'cá nhân', 'căn cước', 'núi', 'sản phẩm', 'lịch hẹn', 'chuyến bay', 'hóa đơn', 'bài viết').
@@ -438,7 +454,8 @@ object CloudAiBackendClient {
         $specificInstructions
         - For ENTITIES & SUMMARY (Phase 2):
           * 'summary' MUST be a clean, factual one-line summary in Vietnamese.
-          * 'entities' MUST extract merchant (brand/store), product (name/item), and place (location/address) if present.
+          * 'entities' MUST extract merchant (brand/store/restaurant), product (name/dish/item), and place (location/address) if present.
+          * 'items_to_buy' MUST be a list of distinct shopping items detected if intent is SHOPPING.
           * 'items_to_buy' MUST be a list of distinct shopping items detected if intent is SHOPPING.
     """.trimIndent()
     }
@@ -469,8 +486,8 @@ object CloudAiBackendClient {
 
         val delimitedItems = buildString {
             appendLine("INPUT SCREENSHOT ITEMS TO CLASSIFY (ANALYZE EACH BOUNDED ITEM IN STRICT ISOLATION):")
-            for ((index, item) in items.withIndex()) {
-                appendLine("--- [START OF ITEM ${index + 1}: ID ${item.photoId}] ---")
+            for (item in items) {
+                appendLine("<photo id=\"${item.photoId}\">")
                 appendLine("Original File Title: ${item.photoTitle}")
                 if (item.hasFace) {
                     appendLine("Visual Context: Human face / portrait photo detected in this image.")
@@ -480,14 +497,14 @@ object CloudAiBackendClient {
                 }
                 appendLine("Scrubbed Screenshot Text:")
                 appendLine(item.scrubbedText.take(4096))
-                appendLine("--- [END OF ITEM ${index + 1}: ID ${item.photoId}] ---")
+                appendLine("</photo>")
                 appendLine()
             }
         }
 
         val systemInstruction = """
             You are an expert AI assistant that organizes screenshots and photos for users.
-            Input consists of screenshot items bounded between '--- [START OF ITEM X: ID ...]' and '--- [END OF ITEM X: ID ...]'.
+            Input consists of screenshot items bounded between '<photo id="..."> ... </photo>'.
             For EACH bounded item in the input, analyze its content independently and return a structured JSON response matching its exact "id".
             
             CRITICAL ISOLATION DIRECTIVE:
@@ -497,26 +514,27 @@ object CloudAiBackendClient {
             ${buildCoreClassificationInstructions(categoriesList, customCatInstruction, isBatch = true)}
 
             OUTPUT FORMAT (MANDATORY):
-            You MUST return ONLY a JSON array of objects, one for each input item, matching its exact "id":
-            [
-              {
-                "id": "exact_id_from_input",
-                "intent": "EVENT" | "SHOPPING" | "READING" | "PERSONAL" | "OTHER",
-                "suggested_title": "Complete descriptive title under 60 chars in Vietnamese",
-                "suggested_event_title": "Clean, complete, meaningful title for calendar event or null",
-                "suggested_event_description": "Clean, concise 1-2 sentence description in Vietnamese or null",
-                "summary": "Clean, factual one-line summary in Vietnamese",
-                "semantic_tags": ["tag1", "tag2", "tag3", "tag4"],
-                "entities": {
-                  "merchant": "Merchant or store name or null",
-                  "product": "Product name or model or null",
-                  "place": "Location or place or null"
-                },
-                "items_to_buy": ["item 1", "item 2"],
-                "event_date_millis": 1740000000000 or null,
-                "target_category_id": "category_id from available list (MANDATORY, NEVER NULL)"
+            You MUST return a JSON object with an 'items' dictionary mapping each exact photo ID from input to its classification data:
+            {
+              "items": {
+                "<exact_id_from_input>": {
+                  "intent": "EVENT" | "SHOPPING" | "READING" | "PERSONAL" | "OTHER",
+                  "suggested_title": "Complete descriptive title under 60 chars in Vietnamese",
+                  "suggested_event_title": "Clean, complete, meaningful title for calendar event or restaurant/product name or null",
+                  "suggested_event_description": "Clean, concise 1-2 sentence description in Vietnamese or null",
+                  "summary": "Clean, factual one-line summary in Vietnamese",
+                  "semantic_tags": ["tag1", "tag2", "tag3", "tag4"],
+                  "entities": {
+                    "merchant": "Merchant or restaurant or store name or null",
+                    "product": "Product name or dish or null",
+                    "place": "Location or street address or null"
+                  },
+                  "items_to_buy": ["item 1", "item 2"],
+                  "event_date_millis": 1740000000000 or null,
+                  "target_category_id": "category_id from available list (MANDATORY, NEVER NULL)"
+                }
               }
-            ]
+            }
         """.trimIndent()
 
         val requestBody = JSONObject().apply {

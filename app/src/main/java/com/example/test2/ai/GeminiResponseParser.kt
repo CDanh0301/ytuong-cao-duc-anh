@@ -193,7 +193,8 @@ object GeminiResponseParser {
             semanticTags = semanticTags,
             summary = summary,
             entities = entitiesMap,
-            itemsToBuy = itemsToBuy
+            itemsToBuy = itemsToBuy,
+            isCloudEnriched = true
         )
     }
 
@@ -224,61 +225,80 @@ object GeminiResponseParser {
                 cleanRaw = cleanRaw.removeSuffix("```").trim()
             }
 
-            // Tier 1: Dynamic Array Extraction (Handles direct array or wrapped object with any root key)
-            val jsonArray = when {
-                cleanRaw.startsWith("[") -> JSONArray(cleanRaw)
-                cleanRaw.startsWith("{") -> {
-                    val obj = JSONObject(cleanRaw)
-                    var foundArray: JSONArray? = obj.optJSONArray("items")
-                        ?: obj.optJSONArray("results")
-                        ?: obj.optJSONArray("data")
-                        ?: obj.optJSONArray("screenshots")
-                        ?: obj.optJSONArray("photos")
+            // Tier 1: Check for Keyed Dictionary Format (e.g. {"items": {"id_1": {...}}})
+            if (cleanRaw.startsWith("{")) {
+                val obj = JSONObject(cleanRaw)
+                val itemsDict = obj.optJSONObject("items") ?: obj.optJSONObject("results") ?: obj.optJSONObject("photos")
+                if (itemsDict != null) {
+                    val keys = itemsDict.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        val itemObj = itemsDict.optJSONObject(key) ?: continue
+                        val normalizedKey = key.removePrefix("device_").removePrefix("photo_").trim()
+                        val matchedItem = itemMap[key] ?: normalizedItemMap[normalizedKey] ?: continue
+                        if (matchedItem.photoId in processedPhotoIds) continue
 
-                    if (foundArray == null) {
-                        val keys = obj.keys()
-                        while (keys.hasNext()) {
-                            val candidate = obj.optJSONArray(keys.next())
-                            if (candidate != null && candidate.length() > 0) {
-                                foundArray = candidate
-                                break
-                            }
-                        }
+                        val parsed = parseSingleJsonObject(
+                            parsedJson = itemObj,
+                            scrubbedText = matchedItem.scrubbedText,
+                            defaultTitle = matchedItem.photoTitle,
+                            categories = categories,
+                            isPro = isPro,
+                            hasFace = matchedItem.hasFace
+                        )
+                        resultMap[matchedItem.photoId] = parsed
+                        processedPhotoIds.add(matchedItem.photoId)
                     }
-                    foundArray ?: JSONArray()
                 }
-                else -> JSONArray()
             }
 
-            // Strict safety check: Positional Index Fallback is ONLY permitted when array lengths match 1:1
-            val allowPositionalFallback = jsonArray.length() == items.size
+            // Tier 2: Array-based fallback (handles legacy array or wrapped array without positional guessing)
+            if (resultMap.isEmpty()) {
+                val jsonArray = when {
+                    cleanRaw.startsWith("[") -> JSONArray(cleanRaw)
+                    cleanRaw.startsWith("{") -> {
+                        val obj = JSONObject(cleanRaw)
+                        var foundArray: JSONArray? = obj.optJSONArray("items")
+                            ?: obj.optJSONArray("results")
+                            ?: obj.optJSONArray("data")
+                            ?: obj.optJSONArray("screenshots")
+                            ?: obj.optJSONArray("photos")
 
-            for (i in 0 until jsonArray.length()) {
-                val itemObj = jsonArray.optJSONObject(i) ?: continue
-                val rawId = itemObj.optString("id", "").trim()
-                val normalizedId = rawId.removePrefix("device_").removePrefix("photo_").trim()
-
-                // Tier 2: Exact Match -> Normalized ID Match -> Tier 3: Strict Positional Fallback
-                val matchedItem = itemMap[rawId]
-                    ?: normalizedItemMap[normalizedId]
-                    ?: if (allowPositionalFallback) items[i] else null
-                    ?: continue
-
-                // Prevent duplicate assignment if model repeated an ID
-                if (matchedItem.photoId in processedPhotoIds) {
-                    continue
+                        if (foundArray == null) {
+                            val keys = obj.keys()
+                            while (keys.hasNext()) {
+                                val candidate = obj.optJSONArray(keys.next())
+                                if (candidate != null && candidate.length() > 0) {
+                                    foundArray = candidate
+                                    break
+                                }
+                            }
+                        }
+                        foundArray ?: JSONArray()
+                    }
+                    else -> JSONArray()
                 }
 
-                val parsed = parseSingleJsonObject(
-                    parsedJson = itemObj,
-                    scrubbedText = matchedItem.scrubbedText,
-                    defaultTitle = matchedItem.photoTitle,
-                    categories = categories,
-                    isPro = isPro,
-                    hasFace = matchedItem.hasFace
-                )
-                resultMap[matchedItem.photoId] = parsed
-                processedPhotoIds.add(matchedItem.photoId)
+                for (i in 0 until jsonArray.length()) {
+                    val itemObj = jsonArray.optJSONObject(i) ?: continue
+                    val rawId = itemObj.optString("id", "").trim()
+                    val normalizedId = rawId.removePrefix("device_").removePrefix("photo_").trim()
+
+                    // Match strictly by exact or normalized ID. Positional fallback is removed to eliminate index drift.
+                    val matchedItem = itemMap[rawId] ?: normalizedItemMap[normalizedId] ?: continue
+                    if (matchedItem.photoId in processedPhotoIds) continue
+
+                    val parsed = parseSingleJsonObject(
+                        parsedJson = itemObj,
+                        scrubbedText = matchedItem.scrubbedText,
+                        defaultTitle = matchedItem.photoTitle,
+                        categories = categories,
+                        isPro = isPro,
+                        hasFace = matchedItem.hasFace
+                    )
+                    resultMap[matchedItem.photoId] = parsed
+                    processedPhotoIds.add(matchedItem.photoId)
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed parsing batch JSON response: ${e.message}", e)

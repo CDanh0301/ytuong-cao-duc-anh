@@ -5,15 +5,11 @@
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <!-- Exclude encrypted photos vault directory from cloud backup -->
+        <exclude domain="file" path="photos"/>
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <!-- Exclude encrypted photos vault directory from D2D transfer as Keystore keys are hardware-bound -->
+        <exclude domain="file" path="photos"/>
     </device-transfer>
-    -->
 </data-extraction-rules>

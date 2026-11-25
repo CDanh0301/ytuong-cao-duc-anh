@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.AlertDialog
@@ -408,43 +409,71 @@ fun HousekeepingScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp),
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFBEB)),
-                    border = BorderStroke(1.dp, Color(0xFFFDE68A)),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF7ED)),
+                    border = BorderStroke(1.5.dp, Color(0xFFF97316)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(16.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             Icon(
-                                imageVector = Icons.Default.Info,
+                                imageVector = Icons.Default.Warning,
                                 contentDescription = null,
-                                tint = Color(0xFFD97706),
-                                modifier = Modifier.size(20.dp)
+                                tint = Color(0xFFEA580C),
+                                modifier = Modifier.size(24.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Khôi phục ảnh trước khi gỡ ứng dụng",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                color = Color(0xFF92400E)
+                                text = "LƯU Ý QUAN TRỌNG KHI GỠ ỨNG DỤNG",
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 13.sp,
+                                color = Color(0xFF9A3412)
                             )
                         }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Lưu ý: Nếu bạn có dự định gỡ cài đặt ứng dụng, hãy khôi phục tất cả ảnh về thiết bị trước để tránh việc hệ điều hành Android tự động xóa ảnh trong thư mục riêng của app.",
-                            fontSize = 12.sp,
-                            color = Color(0xFFB45309),
-                            lineHeight = 16.sp
-                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFFFFEDD5).copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                .padding(10.dp)
+                        ) {
+                            Text(
+                                text = "• Khi Két bật, ảnh được mã hóa và lưu tại bộ nhớ riêng của ứng dụng để bảo vệ quyền riêng tư tuyệt đối.",
+                                fontSize = 12.sp,
+                                color = Color(0xFF9A3412),
+                                lineHeight = 17.sp
+                            )
+                            Text(
+                                text = "• Hệ điều hành Android sẽ xóa toàn bộ ảnh trong Két nếu bạn gỡ cài đặt ứng dụng.",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFC2410C),
+                                lineHeight = 17.sp
+                            )
+                            Text(
+                                text = "• Luôn nhấn nút Khôi phục bên dưới trước khi gỡ ứng dụng để đưa ảnh trở lại Bộ sưu tập máy.",
+                                fontSize = 12.sp,
+                                color = Color(0xFF9A3412),
+                                lineHeight = 17.sp
+                            )
+                        }
+
                         Spacer(modifier = Modifier.height(12.dp))
+
                         Button(
                             onClick = { onRequestRestorePhotos() },
                             enabled = protectedPhotosCount > 0,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFFD97706),
+                                containerColor = Color(0xFFEA580C),
                                 contentColor = Color.White,
                                 disabledContainerColor = Color(0xFFE2E8F0),
                                 disabledContentColor = Color(0xFF94A3B8)
@@ -452,18 +481,18 @@ fun HousekeepingScreen(
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(40.dp)
+                                .height(44.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Restore,
                                 contentDescription = null,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(18.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (protectedPhotosCount > 0) "Khôi phục $protectedPhotosCount ảnh về máy" else "Không có ảnh nào trong Két",
+                                text = if (protectedPhotosCount > 0) "Khôi phục $protectedPhotosCount ảnh về máy ngay" else "Không có ảnh nào trong Két",
                                 fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }

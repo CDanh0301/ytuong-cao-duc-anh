@@ -433,7 +433,9 @@ class PhotoProcessingCoordinator(
             suggestedEventDateMillis = parsed.suggestedEventDateMillis,
             targetCategoryId = parsed.targetCategoryId,
             isProcessed = true,
-            suggestedEventDescription = parsed.suggestedEventDescription
+            suggestedEventDescription = parsed.suggestedEventDescription,
+            isCloudEnriched = parsed.isCloudEnriched,
+            forceUpdate = true
         )
     }
 }

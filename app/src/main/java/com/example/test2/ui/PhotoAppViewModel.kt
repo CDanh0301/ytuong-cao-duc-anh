@@ -28,8 +28,13 @@ import com.example.test2.ai.VectorSemanticSearchEngine
 import com.example.test2.database.AppDatabaseHelper
 import com.example.test2.notifications.ScreenshotNotificationHelper
 import com.example.test2.security.PrivacyVaultManager
+import com.example.test2.security.DeviceAuthManager
 import com.example.test2.storage.isEncryptedPath
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import com.example.test2.services.AgingJobScheduler
 import com.example.test2.services.AgingMonitorManager
 import com.example.test2.services.ScreenshotDetectionManager
@@ -143,6 +148,20 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
     private val _showRestoreSuccessBanner = MutableStateFlow<String?>(null)
     val showRestoreSuccessBanner: StateFlow<String?> = _showRestoreSuccessBanner.asStateFlow()
 
+    private val _showRequireDeviceLockDialog = MutableStateFlow(false)
+    val showRequireDeviceLockDialog: StateFlow<Boolean> = _showRequireDeviceLockDialog.asStateFlow()
+
+    private val _showVaultPermissionDeniedBanner = MutableStateFlow<String?>(null)
+    val showVaultPermissionDeniedBanner: StateFlow<String?> = _showVaultPermissionDeniedBanner.asStateFlow()
+
+    fun dismissRequireDeviceLockDialog() {
+        _showRequireDeviceLockDialog.value = false
+    }
+
+    fun dismissVaultPermissionDeniedBanner() {
+        _showVaultPermissionDeniedBanner.value = null
+    }
+
     private val _isLocalScanning = MutableStateFlow(false)
     private val _pendingAiCount = MutableStateFlow(0)
     val pendingAiCount: StateFlow<Int> = _pendingAiCount.asStateFlow()
@@ -220,6 +239,13 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
 
     private var contentObserver: ContentObserver? = null
     private var pendingVaultScanAfterPermission = false
+    // Must be declared BEFORE init {} because init synchronously triggers scanDevicePhotos()
+    // on Dispatchers.Main.immediate via viewModelScope.launch.
+    private var lastBackgroundTimestamp = 0L
+    private val scanLock = Mutex()
+    private val hasPendingScanRequest = AtomicBoolean(false)
+    private var onDeviceTriageJob: Job? = null
+    private var searchJob: Job? = null
 
     init {
         repository.checkMonthlyQuotaReset(System.currentTimeMillis())
@@ -231,6 +257,14 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
         syncCompletedScreenshotsFromDb()
         refreshActionCardCounts()
 
+        // If OS restarted the process after user granted MANAGE_EXTERNAL_STORAGE in Settings,
+        // immediately resume and activate the pending vault scope.
+        val pendingScope = PrivacyVaultManager.getPendingVaultScope(app)
+        if (pendingScope != null && PrivacyVaultManager.hasAllFilesAccess(app)) {
+            PrivacyVaultManager.setPendingVaultScope(app, null)
+            activateVaultNow(pendingScope)
+        }
+
         if (_hasStoragePermission.value) {
             checkPrivacyConsentPrompt()
             ScreenshotJobScheduler.schedule(application)
@@ -239,32 +273,96 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    private fun buildRecoveredVaultedPhoto(
+        record: com.example.test2.database.ProcessedScreenshotRecord,
+        vaultedFile: File,
+        isCompleted: Boolean
+    ): Photo {
+        val resolvedCatIds = if (!record.targetCategoryId.isNullOrBlank()) setOf(record.targetCategoryId) else emptySet()
+        val resolvedTitle = record.photoTitle?.takeIf { it.isNotBlank() && !it.startsWith("secure_vault_") }
+            ?: record.originalFileName?.substringBeforeLast(".")?.takeIf { it.isNotBlank() && !it.startsWith("secure_vault_") }
+            ?: record.eventTitle?.takeIf { it.isNotBlank() }
+            ?: record.filePath.substringAfterLast("/").removeSuffix(".enc").substringBeforeLast(".")
+        val resolvedPhotoDate = if (record.dateAdded > 0L) {
+            record.dateAdded
+        } else if (vaultedFile.exists()) {
+            vaultedFile.lastModified()
+        } else {
+            System.currentTimeMillis()
+        }
+        return Photo(
+            id = record.photoId,
+            fileName = record.filePath.substringAfterLast("/"),
+            filePath = record.filePath,
+            title = resolvedTitle.ifBlank { "Ảnh chụp màn hình" },
+            description = record.summary ?: "",
+            folderId = "folder_screenshots",
+            categoryIds = resolvedCatIds,
+            isFavorite = false,
+            isScreenshot = true,
+            dateAdded = resolvedPhotoDate,
+            fileSizeBytes = vaultedFile.length(),
+            isProcessed = isCompleted,
+            isCloudEnriched = isCompleted,
+            piiScrubbedText = record.scrubbedText,
+            detectedIntent = record.detectedIntent,
+            suggestedEventTitle = record.eventTitle,
+            suggestedEventDateMillis = record.eventDateMillis,
+            suggestedEventDescription = record.eventDescription,
+            semanticTags = record.tags?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
+        )
+    }
+
     private fun observeCloudAiSyncEvents() {
         viewModelScope.launch {
             CloudAiSyncNotifier.syncEvents.collect { completedIds ->
+                repository.awaitInitialLoad()
                 val records = dbHelper.getProcessedScreenshotsByIds(completedIds)
-                val updates = records.mapNotNull { record ->
-                    val resolvedCatId = record.targetCategoryId
+                val currentPhotos = repository.photos.value
+                val existingIds = currentPhotos.map { it.id }.toSet()
+
+                val missingVaultedPhotos = mutableListOf<Photo>()
+                val updates = mutableListOf<PhotoAiMetadataUpdate>()
+
+                for (record in records) {
                     val isVaulted = record.filePath.isEncryptedPath()
-                    if (!resolvedCatId.isNullOrBlank() || isVaulted) {
-                        val vaultedFile = if (isVaulted) File(record.filePath) else null
-                        PhotoAiMetadataUpdate(
-                            photoId = record.photoId,
-                            newFilePath = if (isVaulted) record.filePath else null,
-                            newFileName = if (isVaulted) record.filePath.substringAfterLast("/") else null,
-                            newFileSizeBytes = if (vaultedFile != null && vaultedFile.exists()) vaultedFile.length() else null,
-                            isScreenshot = true,
-                            piiScrubbedText = record.scrubbedText,
-                            detectedIntent = record.detectedIntent,
-                            suggestedEventTitle = record.eventTitle,
-                            suggestedEventDateMillis = record.eventDateMillis,
-                            targetCategoryId = resolvedCatId,
-                            isProcessed = true,
-                            isCloudEnriched = true,
-                            suggestedEventDescription = record.eventDescription,
-                            semanticTags = record.tags?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
-                        )
-                    } else null
+                    if (record.photoId !in existingIds) {
+                        if (isVaulted) {
+                            val vaultedFile = File(record.filePath)
+                            if (vaultedFile.exists() && vaultedFile.length() > 0L) {
+                                missingVaultedPhotos.add(
+                                    buildRecoveredVaultedPhoto(record, vaultedFile, isCompleted = true)
+                                )
+                            }
+                        }
+                    } else {
+                        val resolvedCatId = record.targetCategoryId
+                        if (!resolvedCatId.isNullOrBlank() || isVaulted) {
+                            val vaultedFile = if (isVaulted) File(record.filePath) else null
+                            updates.add(
+                                PhotoAiMetadataUpdate(
+                                    photoId = record.photoId,
+                                    newFilePath = if (isVaulted) record.filePath else null,
+                                    newFileName = if (isVaulted) record.filePath.substringAfterLast("/") else null,
+                                    newFileSizeBytes = if (vaultedFile != null && vaultedFile.exists()) vaultedFile.length() else null,
+                                    isScreenshot = true,
+                                    piiScrubbedText = record.scrubbedText,
+                                    detectedIntent = record.detectedIntent,
+                                    suggestedEventTitle = record.eventTitle,
+                                    suggestedEventDateMillis = record.eventDateMillis,
+                                    targetCategoryId = resolvedCatId,
+                                    isProcessed = true,
+                                    isCloudEnriched = true,
+                                    suggestedEventDescription = record.eventDescription,
+                                    semanticTags = record.tags?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
+                                )
+                            )
+                        }
+                    }
+                }
+
+                if (missingVaultedPhotos.isNotEmpty()) {
+                    repository.addVaultedPhotos(missingVaultedPhotos)
                 }
                 if (updates.isNotEmpty()) {
                     repository.updatePhotoAiMetadataBatch(updates)
@@ -277,11 +375,32 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
 
     private fun syncCompletedScreenshotsFromDb() {
         viewModelScope.launch(Dispatchers.IO) {
-            val records = dbHelper.getAllCompletedProcessedScreenshots()
+            repository.awaitInitialLoad()
+            val records = dbHelper.getAllCompletedOrVaultedScreenshots()
             if (records.isNotEmpty()) {
                 val recordMap = records.associateBy { it.photoId }
                 val currentPhotos = repository.photos.value
+                val existingIds = currentPhotos.map { it.id }.toSet()
                 val updates = mutableListOf<PhotoAiMetadataUpdate>()
+                val missingVaultedPhotos = mutableListOf<Photo>()
+
+                // 1. Reconciliation: recover any background-processed vaulted photos that were evicted from MediaStore
+                for (record in records) {
+                    if (record.photoId !in existingIds && record.filePath.isEncryptedPath()) {
+                        val vaultedFile = File(record.filePath)
+                        if (vaultedFile.exists() && vaultedFile.length() > 0L) {
+                            missingVaultedPhotos.add(
+                                buildRecoveredVaultedPhoto(record, vaultedFile, isCompleted = record.status == "COMPLETED")
+                            )
+                        }
+                    }
+                }
+
+                if (missingVaultedPhotos.isNotEmpty()) {
+                    repository.addVaultedPhotos(missingVaultedPhotos)
+                }
+
+                // 2. Synchronize metadata updates for photos currently in memory
                 for (photo in currentPhotos) {
                     val record = recordMap[photo.id]
                     if (record != null) {
@@ -289,8 +408,9 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
                         val catNeedsUpdate = !record.targetCategoryId.isNullOrBlank() && currentCatId != record.targetCategoryId
                         val pathNeedsUpdate = record.filePath.isEncryptedPath() && !photo.filePath.isEncryptedPath()
                         val metaNeedsUpdate = !record.eventDescription.isNullOrBlank() && photo.suggestedEventDescription != record.eventDescription
+                        val isCompleted = record.status == "COMPLETED"
 
-                        if (catNeedsUpdate || pathNeedsUpdate || metaNeedsUpdate || !photo.isProcessed) {
+                        if (isCompleted && (catNeedsUpdate || pathNeedsUpdate || metaNeedsUpdate || !photo.isProcessed)) {
                             val vaultedFile = if (record.filePath.isEncryptedPath()) File(record.filePath) else null
                             updates.add(
                                 PhotoAiMetadataUpdate(
@@ -309,6 +429,16 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
                                     semanticTags = record.tags?.split(" ")?.filter { it.isNotBlank() } ?: photo.semanticTags
                                 )
                             )
+                        } else if (pathNeedsUpdate) {
+                            val vaultedFile = File(record.filePath)
+                            if (vaultedFile.exists() && vaultedFile.length() > 0L) {
+                                repository.updatePhotoStoragePath(
+                                    photoId = record.photoId,
+                                    newFilePath = record.filePath,
+                                    newFileName = record.filePath.substringAfterLast("/"),
+                                    newFileSizeBytes = vaultedFile.length()
+                                )
+                            }
                         }
                     }
                 }
@@ -351,6 +481,10 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
     fun onEnableVault() {
         PrivacyVaultManager.setPromptedConsent(app, true)
         _showPrivacyConsentDialog.value = false
+        if (!DeviceAuthManager.isDeviceSecure(app)) {
+            _showRequireDeviceLockDialog.value = true
+            return
+        }
         confirmEnableVault(vaultAll = true)
     }
 
@@ -371,7 +505,11 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun requestEnableVault() {
-        _showEnableVaultScopeDialog.value = true
+        if (!DeviceAuthManager.isDeviceSecure(app)) {
+            _showRequireDeviceLockDialog.value = true
+        } else {
+            _showEnableVaultScopeDialog.value = true
+        }
     }
 
     fun dismissEnableVaultScopeDialog() {
@@ -380,25 +518,59 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
 
     fun confirmEnableVault(vaultAll: Boolean) {
         val scope = if (vaultAll) PrivacyVaultManager.SCOPE_ALL else PrivacyVaultManager.SCOPE_NEW_ONLY
+        _showEnableVaultScopeDialog.value = false
+        if (!PrivacyVaultManager.hasAllFilesAccess(app)) {
+            // Persist across process kill: Android kills the app when MANAGE_EXTERNAL_STORAGE changes in Settings
+            PrivacyVaultManager.setPendingVaultScope(app, scope)
+            _showAllFilesAccessDialog.value = true
+        } else {
+            PrivacyVaultManager.setPendingVaultScope(app, null)
+            activateVaultNow(scope)
+        }
+    }
+
+    private fun activateVaultNow(scope: String) {
+        if (scope == PrivacyVaultManager.SCOPE_ALL) {
+            PrivacyVaultManager.clearAllRestoredExempts(app)
+        }
         PrivacyVaultManager.setVaultScope(app, scope)
         PrivacyVaultManager.setVaultEnabledSince(app, System.currentTimeMillis())
         PrivacyVaultManager.setVaultEnabled(app, true)
         _isVaultEnabled.value = true
         _isAppUnlocked.value = true
-        _showEnableVaultScopeDialog.value = false
-        if (!PrivacyVaultManager.hasAllFilesAccess(app)) {
-            pendingVaultScanAfterPermission = true
-            _showAllFilesAccessDialog.value = true
-        } else {
-            scanDevicePhotos()
+        scanDevicePhotos()
+    }
+
+    fun notifyAppBackgrounded() {
+        lastBackgroundTimestamp = System.currentTimeMillis()
+    }
+
+    fun checkAppLockOnResume() {
+        if (_isVaultEnabled.value) {
+            val elapsed = System.currentTimeMillis() - lastBackgroundTimestamp
+            val gracePeriodMillis = 60_000L // 60 seconds grace period
+            if (lastBackgroundTimestamp > 0L && elapsed >= gracePeriodMillis) {
+                _isAppUnlocked.value = false
+            }
         }
     }
 
     fun checkVaultPermissionResumed() {
-        if (pendingVaultScanAfterPermission && PrivacyVaultManager.hasAllFilesAccess(app)) {
-            pendingVaultScanAfterPermission = false
-            scanDevicePhotos()
+        val pendingScope = PrivacyVaultManager.getPendingVaultScope(app)
+        if (pendingScope != null) {
+            PrivacyVaultManager.setPendingVaultScope(app, null)
+            if (PrivacyVaultManager.hasAllFilesAccess(app)) {
+                activateVaultNow(pendingScope)
+            } else {
+                _showVaultPermissionDeniedBanner.value = "Két bảo mật chưa được bật do thiếu quyền Quản lý tất cả tệp"
+            }
         }
+    }
+
+    fun onResumeScan() {
+        checkAppLockOnResume()
+        checkVaultPermissionResumed()
+        scanDevicePhotos()
     }
 
     fun requestDisableVault() {
@@ -409,6 +581,7 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
             _showDisableVaultDialog.value = true
         } else {
             PrivacyVaultManager.setVaultEnabled(app, false)
+            PrivacyVaultManager.clearAllRestoredExempts(app)
             _isVaultEnabled.value = false
             _isAppUnlocked.value = true
             _showDisableVaultDialog.value = false
@@ -421,31 +594,136 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
 
     fun restoreAllVaultedPhotos() {
         viewModelScope.launch(Dispatchers.IO) {
-            val currentPhotos = repository.photos.value
-            val vaultedList = currentPhotos.filter {
-                it.filePath.isEncryptedPath() || (it.isScreenshot && !it.filePath.startsWith("content://"))
-            }
+            repository.awaitInitialLoad()
+            _showDisableVaultDialog.value = false
 
-            if (vaultedList.isEmpty()) {
+            var restoredAny = false
+            scanLock.withLock {
+                val currentPhotos = repository.photos.value
+                // Restore oldest -> newest so MediaStore _ID and filesystem order match natural chronology
+                val vaultedList = currentPhotos.filter {
+                    it.filePath.isEncryptedPath() || (it.isScreenshot && !it.filePath.startsWith("content://"))
+                }.sortedWith(PhotoRepository.chronologicalAscComparator)
+
+                if (vaultedList.isEmpty()) {
+                    PrivacyVaultManager.setVaultEnabled(app, false)
+                    PrivacyVaultManager.clearAllRestoredExempts(app)
+                    _isVaultEnabled.value = false
+                    _isAppUnlocked.value = true
+                    _isRestoringPhotos.value = false
+                    return@withLock
+                }
+
+                _isRestoringPhotos.value = true
+                _restoreProgress.value = RestoreProgress(0, vaultedList.size)
+
+                // Disable vault synchronously BEFORE the restore loop so neither ContentObserver scans
+                // nor background ScreenshotQueueWorker can re-vault photos mid-restore.
+                val wasVaultEnabled = PrivacyVaultManager.isVaultEnabled(app)
                 PrivacyVaultManager.setVaultEnabled(app, false)
                 _isVaultEnabled.value = false
-                _isAppUnlocked.value = true
-                _showDisableVaultDialog.value = false
-                return@launch
+
+                var successCount = 0
+                var failedCount = 0
+                val restoredNewIds = mutableListOf<String>()
+
+                PrivacyVaultManager.beginInternalEviction()
+                try {
+                    for (photo in vaultedList) {
+                        val targetRestoreName = PrivacyVaultManager.sanitizeRestoreFileName(
+                            rawTitle = photo.title,
+                            encryptedFilePath = photo.filePath,
+                            fallbackFileName = photo.fileName
+                        )
+                        val result = PrivacyVaultManager.restoreAndEvictScreenshot(
+                            context = app,
+                            vaultedFilePath = photo.filePath,
+                            originalFileName = targetRestoreName,
+                            originalDateAddedMillis = photo.dateAdded,
+                            markExemptOnRestore = false
+                        )
+                        if (result != null) {
+                            val newPhotoId = "device_${result.newMediaId}"
+                            restoredNewIds.add(newPhotoId)
+                            dbHelper.migratePhotoRecords(
+                                oldPhotoId = photo.id,
+                                newPhotoId = newPhotoId,
+                                newFilePath = result.newUri,
+                                dateAdded = photo.dateAdded,
+                                scrubbedText = photo.piiScrubbedText,
+                                detectedIntent = photo.detectedIntent,
+                                eventTitle = photo.suggestedEventTitle,
+                                eventDateMillis = photo.suggestedEventDateMillis,
+                                targetCategoryId = photo.categoryIds.firstOrNull(),
+                                eventDescription = photo.suggestedEventDescription,
+                                photoTitle = photo.title,
+                                originalFileName = result.newFileName
+                            )
+                            repository.updatePhotoStoragePath(
+                                photoId = photo.id,
+                                newFilePath = result.newUri,
+                                newFileName = result.newFileName,
+                                newFileSizeBytes = result.fileSizeBytes,
+                                newPhotoId = newPhotoId
+                            )
+                            successCount++
+                        } else {
+                            failedCount++
+                        }
+                        _restoreProgress.value = RestoreProgress(successCount + failedCount, vaultedList.size)
+                    }
+                } finally {
+                    delay(350)
+                    PrivacyVaultManager.endInternalEviction()
+                }
+
+                _isRestoringPhotos.value = false
+                restoredAny = successCount > 0
+
+                if (failedCount == 0) {
+                    PrivacyVaultManager.setVaultEnabled(app, false)
+                    PrivacyVaultManager.clearAllRestoredExempts(app)
+                    _isVaultEnabled.value = false
+                    _isAppUnlocked.value = true
+                    _showRestoreSuccessBanner.value = "Đã khôi phục thành công toàn bộ $successCount ảnh về Bộ sưu tập của máy"
+                } else {
+                    for (restoredId in restoredNewIds) {
+                        PrivacyVaultManager.markRestoredExempt(app, restoredId)
+                    }
+                    PrivacyVaultManager.setVaultEnabled(app, wasVaultEnabled)
+                    _isVaultEnabled.value = wasVaultEnabled
+                    _showRestoreSuccessBanner.value = "Đã khôi phục $successCount ảnh. Còn $failedCount ảnh chưa thể xuất ra (vẫn được lưu an toàn trong Két). Vui lòng thử lại sau."
+                }
             }
 
-            _isRestoringPhotos.value = true
-            _restoreProgress.value = RestoreProgress(0, vaultedList.size)
+            refreshActionCardCounts()
+            if (restoredAny) {
+                scanDevicePhotos()
+            }
+        }
+    }
 
-            var restoredCount = 0
-            for (photo in vaultedList) {
-                val result = PrivacyVaultManager.restoreAndEvictScreenshot(
-                    context = app,
-                    vaultedFilePath = photo.filePath,
-                    originalFileName = photo.fileName
-                )
-                if (result != null) {
+    fun restoreSinglePhoto(photo: Photo) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.awaitInitialLoad()
+            val restoredNewPhotoId: String? = scanLock.withLock {
+                PrivacyVaultManager.beginInternalEviction()
+                try {
+                    val targetRestoreName = PrivacyVaultManager.sanitizeRestoreFileName(
+                        rawTitle = photo.title,
+                        encryptedFilePath = photo.filePath,
+                        fallbackFileName = photo.fileName
+                    )
+                    val result = PrivacyVaultManager.restoreAndEvictScreenshot(
+                        context = app,
+                        vaultedFilePath = photo.filePath,
+                        originalFileName = targetRestoreName,
+                        originalDateAddedMillis = photo.dateAdded,
+                        markExemptOnRestore = true
+                    ) ?: return@withLock null
+
                     val newPhotoId = "device_${result.newMediaId}"
+                    PrivacyVaultManager.markRestoredExempt(app, newPhotoId)
                     dbHelper.migratePhotoRecords(
                         oldPhotoId = photo.id,
                         newPhotoId = newPhotoId,
@@ -456,7 +734,9 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
                         eventTitle = photo.suggestedEventTitle,
                         eventDateMillis = photo.suggestedEventDateMillis,
                         targetCategoryId = photo.categoryIds.firstOrNull(),
-                        eventDescription = photo.suggestedEventDescription
+                        eventDescription = photo.suggestedEventDescription,
+                        photoTitle = photo.title,
+                        originalFileName = result.newFileName
                     )
                     repository.updatePhotoStoragePath(
                         photoId = photo.id,
@@ -465,18 +745,95 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
                         newFileSizeBytes = result.fileSizeBytes,
                         newPhotoId = newPhotoId
                     )
+
+                    val remainingVaulted = repository.photos.value.count {
+                        it.id != newPhotoId && it.id != photo.id &&
+                            (it.filePath.isEncryptedPath() || (it.isScreenshot && !it.filePath.startsWith("content://")))
+                    }
+                    val hasRemainingEncFiles = File(app.filesDir, "photos")
+                        .listFiles()
+                        ?.any { it.isFile && it.name.endsWith(".enc") && it.length() > 0L } == true
+                    if (remainingVaulted == 0 && !hasRemainingEncFiles) {
+                        PrivacyVaultManager.setVaultEnabled(app, false)
+                        PrivacyVaultManager.clearAllRestoredExempts(app)
+                        _isVaultEnabled.value = false
+                    }
+                    newPhotoId
+                } finally {
+                    delay(350)
+                    PrivacyVaultManager.endInternalEviction()
                 }
-                restoredCount++
-                _restoreProgress.value = RestoreProgress(restoredCount, vaultedList.size)
             }
 
-            PrivacyVaultManager.setVaultEnabled(app, false)
-            _isVaultEnabled.value = false
-            _isAppUnlocked.value = true
-            _isRestoringPhotos.value = false
-            _showDisableVaultDialog.value = false
-            _showRestoreSuccessBanner.value = "Đã khôi phục thành công $restoredCount ảnh về Bộ sưu tập của máy"
-            scanDevicePhotos()
+            if (restoredNewPhotoId != null) {
+                refreshActionCardCounts()
+                _showRestoreSuccessBanner.value = "Đã khôi phục ảnh '${photo.title}' về Bộ sưu tập của máy"
+                if (_photoSettings.value?.id == photo.id) {
+                    _photoSettings.value = repository.photos.value.firstOrNull { it.id == restoredNewPhotoId }
+                }
+                scanDevicePhotos()
+            } else {
+                _showRestoreSuccessBanner.value = "Không thể khôi phục ảnh '${photo.title}'. Vui lòng thử lại sau."
+            }
+        }
+    }
+
+    fun vaultSinglePhoto(photo: Photo) {
+        if (!PrivacyVaultManager.hasAllFilesAccess(app)) {
+            _showAllFilesAccessDialog.value = true
+            return
+        }
+        if (!DeviceAuthManager.isDeviceSecure(app)) {
+            _showRequireDeviceLockDialog.value = true
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.awaitInitialLoad()
+            val success = scanLock.withLock {
+                PrivacyVaultManager.beginInternalEviction()
+                try {
+                    PrivacyVaultManager.clearRestoredExempt(app, photo.id)
+                    val uri = if (photo.filePath.startsWith("content://")) Uri.parse(photo.filePath) else null
+                    val vaulted = PrivacyVaultManager.vaultAndEvictScreenshot(
+                        app,
+                        uri,
+                        photo.filePath,
+                        photo.fileName
+                    )
+                    if (vaulted != null) {
+                        dbHelper.syncVaultedPathToQueue(
+                            photoId = photo.id,
+                            newFilePath = vaulted.newFilePath,
+                            dateAdded = photo.dateAdded,
+                            photoTitle = photo.title,
+                            originalFileName = photo.fileName
+                        )
+                        repository.updatePhotoStoragePath(
+                            photoId = photo.id,
+                            newFilePath = vaulted.newFilePath,
+                            newFileName = vaulted.newFileName,
+                            newFileSizeBytes = vaulted.fileSizeBytes
+                        )
+                        PrivacyVaultManager.setVaultEnabled(app, true)
+                        _isVaultEnabled.value = true
+                        _isAppUnlocked.value = true
+                        true
+                    } else {
+                        false
+                    }
+                } finally {
+                    delay(300)
+                    PrivacyVaultManager.endInternalEviction()
+                }
+            }
+            if (success) {
+                _showRestoreSuccessBanner.value = "Đã chuyển ảnh '${photo.title}' vào Két bảo mật an toàn"
+                if (_photoSettings.value?.id == photo.id) {
+                    _photoSettings.value = repository.photos.value.firstOrNull { it.id == photo.id }
+                }
+            } else {
+                _showRestoreSuccessBanner.value = "Không thể đưa ảnh '${photo.title}' vào Két bảo mật."
+            }
         }
     }
 
@@ -488,8 +845,14 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
         _showAllFilesAccessDialog.value = false
     }
 
+    fun cancelAllFilesAccessDialog() {
+        PrivacyVaultManager.setPendingVaultScope(app, null)
+        _showAllFilesAccessDialog.value = false
+    }
+
     fun unlockApp() {
         _isAppUnlocked.value = true
+        lastBackgroundTimestamp = 0L
     }
 
     fun lockApp() {
@@ -545,23 +908,52 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
 
     fun scanDevicePhotos() {
         viewModelScope.launch {
-            _isLocalScanning.value = true
-            updateScanningState()
-            val scanResult = mediaScanner.scanDeviceImages()
-            if (scanResult.photos.isNotEmpty() || scanResult.folders.isNotEmpty()) {
-                val processedPhotos = if (_isVaultEnabled.value && PrivacyVaultManager.hasAllFilesAccess(app)) {
-                    withContext(Dispatchers.IO) {
+            if (!scanLock.tryLock()) {
+                // Another scan is actively in progress. Flag pending scan to execute immediately after completion.
+                // NEVER cancel the current scan to prevent partial file writes or desynchronized state!
+                hasPendingScanRequest.set(true)
+                return@launch
+            }
+
+            try {
+                do {
+                    hasPendingScanRequest.set(false)
+                    performScanDevicePhotosInternal()
+                } while (hasPendingScanRequest.getAndSet(false))
+            } finally {
+                scanLock.unlock()
+            }
+        }
+    }
+
+    private suspend fun performScanDevicePhotosInternal() {
+        _isLocalScanning.value = true
+        updateScanningState()
+        repository.awaitInitialLoad()
+        val scanResult = mediaScanner.scanDeviceImages()
+        if (scanResult.photos.isNotEmpty() || scanResult.folders.isNotEmpty()) {
+            val processedPhotos = if (_isVaultEnabled.value && PrivacyVaultManager.hasAllFilesAccess(app)) {
+                withContext(Dispatchers.IO) {
+                    PrivacyVaultManager.beginInternalEviction()
+                    try {
                         scanResult.photos.map { photo ->
-                            if (photo.isScreenshot && !photo.filePath.isEncryptedPath() && PrivacyVaultManager.shouldVaultScreenshot(app, photo.dateAdded)) {
+                            if (photo.isScreenshot && !photo.filePath.isEncryptedPath() && PrivacyVaultManager.shouldAutoVaultPhoto(app, photo.id, photo.dateAdded)) {
                                 val uri = if (photo.filePath.startsWith("content://")) Uri.parse(photo.filePath) else null
+                                val physicalPath = scanResult.physicalPaths[photo.id] ?: photo.filePath
                                 val vaulted = PrivacyVaultManager.vaultAndEvictScreenshot(
                                     app,
                                     uri,
-                                    photo.filePath,
+                                    physicalPath,
                                     photo.fileName
                                 )
                                 if (vaulted != null) {
-                                    dbHelper.syncVaultedPathToQueue(photo.id, vaulted.newFilePath)
+                                    dbHelper.syncVaultedPathToQueue(
+                                        photoId = photo.id,
+                                        newFilePath = vaulted.newFilePath,
+                                        dateAdded = photo.dateAdded,
+                                        photoTitle = photo.title,
+                                        originalFileName = photo.fileName
+                                    )
                                     photo.copy(
                                         filePath = vaulted.newFilePath,
                                         fileName = vaulted.newFileName,
@@ -574,29 +966,30 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
                                 photo
                             }
                         }
+                    } finally {
+                        delay(300)
+                        PrivacyVaultManager.endInternalEviction()
                     }
-                } else {
-                    scanResult.photos
                 }
-                repository.syncDevicePhotos(processedPhotos, scanResult.folders)
-                _isLocalScanning.value = false
-                updateScanningState()
-
-                // Immediately bind any completed AI metadata from DB for already processed photos
-                syncCompletedScreenshotsFromDb()
-
-                ensureVectorsIndexed()
-
-                // Launch On-Device Triage in background (UI is already visible and interactive)
-                launchOnDeviceTriage()
             } else {
-                _isLocalScanning.value = false
-                updateScanningState()
+                scanResult.photos
             }
+            repository.syncDevicePhotos(processedPhotos, scanResult.folders)
+            _isLocalScanning.value = false
+            updateScanningState()
+
+            // Immediately bind any completed AI metadata from DB for already processed photos
+            syncCompletedScreenshotsFromDb()
+
+            ensureVectorsIndexed()
+
+            // Launch On-Device Triage in background (UI is already visible and interactive)
+            launchOnDeviceTriage()
+        } else {
+            _isLocalScanning.value = false
+            updateScanningState()
         }
     }
-
-    private var onDeviceTriageJob: Job? = null
 
     private fun launchOnDeviceTriage() {
         onDeviceTriageJob?.cancel()
@@ -856,9 +1249,7 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
                 if (!p.filePath.startsWith("content://")) {
                     storage.deletePhysicalFile(p.filePath)
                 }
-                dbHelper.removePhotoFts(p.id)
-                dbHelper.deletePhotoVector(p.id)
-                dbHelper.deleteActionCardsForPhoto(p.id)
+                dbHelper.purgePhotoData(p.id)
             }
             repository.batchDeletePhotos(photosToClean.map { it.id })
             refreshActionCardCounts()
@@ -1039,9 +1430,7 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
             if (!photo.filePath.startsWith("content://")) {
                 storage.deletePhysicalFile(photo.filePath)
             }
-            dbHelper.removePhotoFts(photo.id)
-            dbHelper.deletePhotoVector(photo.id)
-            dbHelper.deleteActionCardsForPhoto(photo.id)
+            dbHelper.purgePhotoData(photo.id)
             repository.deletePhoto(photo.id)
             refreshActionCardCounts()
             if (_viewingPhotoId.value == photo.id) {
@@ -1123,8 +1512,6 @@ class PhotoAppViewModel(application: Application) : AndroidViewModel(application
             }
         }
     }
-
-    private var searchJob: Job? = null
 
     fun setSearchQuery(query: String) {
         searchJob?.cancel()

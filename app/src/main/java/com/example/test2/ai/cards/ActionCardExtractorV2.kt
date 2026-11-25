@@ -159,20 +159,24 @@ object ActionCardExtractorV2 {
         if (rawOcrText.isBlank()) return cards
 
         // 1. Payment
-        val paymentCard = extractPaymentFromText(photoId, rawOcrText)
-        if (paymentCard != null) {
-            cards.add(paymentCard)
-        }
+        try {
+            val paymentCard = extractPaymentFromText(photoId, rawOcrText)
+            if (paymentCard != null) {
+                cards.add(paymentCard)
+            }
+        } catch (_: Exception) {}
 
-        // 2. Address
-        val addressCard = extractAddressCard(photoId, rawOcrText, ocrLines)
-        if (addressCard != null) {
-            cards.add(addressCard)
-        }
+        // 2. Address(es)
+        try {
+            val addressCards = extractAddressCards(photoId, rawOcrText, ocrLines)
+            cards.addAll(addressCards)
+        } catch (_: Exception) {}
 
         // 3. Contact(s)
-        val contactCards = extractContactCards(photoId, rawOcrText, ocrLines)
-        cards.addAll(contactCards)
+        try {
+            val contactCards = extractContactCards(photoId, rawOcrText, ocrLines)
+            cards.addAll(contactCards)
+        } catch (_: Exception) {}
 
         // 4. Event - Deprecated: Calendar events are managed exclusively via cat_events and Photo.suggestedEventDateMillis
         // val eventCard = extractEventFromText(photoId, rawOcrText, photoTitle)
@@ -183,38 +187,53 @@ object ActionCardExtractorV2 {
         }
     }
 
+    private fun extractAddressCards(
+        photoId: String,
+        rawOcrText: String,
+        ocrLines: List<OcrLine>?
+    ): List<ActionCard> {
+        val results = try {
+            AddressExtractor.extractAddresses(rawOcrText, ocrLines)
+        } catch (_: Exception) {
+            emptyList()
+        }
+        if (results.isEmpty()) return emptyList()
+
+        return results.map { result ->
+            val title = if (result.placeName.isNotBlank()) {
+                "📍 ${result.placeName}"
+            } else {
+                "📍 ${result.fullAddress.take(50)}"
+            }
+
+            val payloadJson = JSONObject().apply {
+                put("fullAddress", result.fullAddress)
+                put("placeName", result.placeName)
+                put("city", result.city)
+                put("adminSystem", result.adminSystem)
+                put("ev", CardIds.EXTRACTOR_VERSION)
+            }.toString()
+
+            val cardId = CardIds.generateId(photoId, ActionCardType.ADDRESS, result.fullAddress)
+
+            ActionCard(
+                id = cardId,
+                photoId = photoId,
+                type = ActionCardType.ADDRESS,
+                title = title,
+                subtitle = result.fullAddress,
+                payloadJson = payloadJson,
+                createdAt = 0L
+            )
+        }
+    }
+
     private fun extractAddressCard(
         photoId: String,
         rawOcrText: String,
         ocrLines: List<OcrLine>?
     ): ActionCard? {
-        val result = AddressExtractor.extractAddress(rawOcrText, ocrLines) ?: return null
-
-        val title = if (result.placeName.isNotBlank()) {
-            "📍 ${result.placeName}"
-        } else {
-            "📍 ${result.fullAddress.take(50)}"
-        }
-
-        val payloadJson = JSONObject().apply {
-            put("fullAddress", result.fullAddress)
-            put("placeName", result.placeName)
-            put("city", result.city)
-            put("adminSystem", result.adminSystem)
-            put("ev", CardIds.EXTRACTOR_VERSION)
-        }.toString()
-
-        val cardId = CardIds.generateId(photoId, ActionCardType.ADDRESS, result.fullAddress)
-
-        return ActionCard(
-            id = cardId,
-            photoId = photoId,
-            type = ActionCardType.ADDRESS,
-            title = title,
-            subtitle = result.fullAddress,
-            payloadJson = payloadJson,
-            createdAt = 0L
-        )
+        return extractAddressCards(photoId, rawOcrText, ocrLines).firstOrNull()
     }
 
     private fun extractContactCards(

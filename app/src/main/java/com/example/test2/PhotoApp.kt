@@ -25,6 +25,24 @@ class PhotoApp : Application(), ImageLoaderFactory {
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
             .components {
+                add(coil.intercept.Interceptor { chain ->
+                    val request = chain.request
+                    val isEncrypted = when (val data = request.data) {
+                        is java.io.File -> data.name.endsWith(".enc")
+                        is String -> data.endsWith(".enc")
+                        is android.net.Uri -> data.path?.endsWith(".enc") == true
+                        else -> false
+                    }
+                    val newRequest = if (isEncrypted) {
+                        request.newBuilder()
+                            .diskCachePolicy(coil.request.CachePolicy.DISABLED)
+                            .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                            .build()
+                    } else {
+                        request
+                    }
+                    chain.proceed(newRequest)
+                })
                 add(EncryptedPhotoFetcher.StringFactory())
                 add(EncryptedPhotoFetcher.UriFactory())
                 add(EncryptedPhotoFetcher.FileFactory())
@@ -35,6 +53,11 @@ class PhotoApp : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            android.util.Log.e("PhotoApp", "FATAL CRASH on thread ${thread.name}: ${throwable.message}", throwable)
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
         ScreenshotNotificationHelper.createNotificationChannel(this)
 
         // 1. Arm JobScheduler with TriggerContentUri (survives process termination/swiping away)

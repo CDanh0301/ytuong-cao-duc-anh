@@ -96,13 +96,59 @@ object AdminUnits {
             for (alias in prov.aliases) {
                 val aLower = alias.lowercase(Locale.getDefault())
                 val aUnacc = VietnameseUtils.removeDiacritics(aLower)
-                if (Regex("""(?i)(?:^|[\s,;./\-]|\b)${Regex.escape(aLower)}(?:$|[\s,;./\-]|\b)""").containsMatchIn(lowerWithoutStreet) ||
-                    Regex("""(?i)(?:^|[\s,;./\-]|\b)${Regex.escape(aUnacc)}(?:$|[\s,;./\-]|\b)""").containsMatchIn(unacc)) {
+                if (Regex("""(?i)(?:^|[-,\s;./]|\b)${Regex.escape(aLower)}(?:$|[-,\s;./]|\b)""").containsMatchIn(lowerWithoutStreet) ||
+                    Regex("""(?i)(?:^|[-,\s;./]|\b)${Regex.escape(aUnacc)}(?:$|[-,\s;./]|\b)""").containsMatchIn(unacc)) {
                     return prov.officialName
                 }
             }
         }
         return ""
+    }
+
+    private val ADMIN_BOUNDARY_REGEX = Regex(
+        """(?i)(?:TP\.?\s*|thành\s*phố\s*|tỉnh\s*)?(?:Hà\s*Nội|Hồ\s*Chí\s*Minh|TP\.?\s*HCM|Sài\s*Gòn|Đà\s*Nẵng|Hải\s*Phòng|Cần\s*Th[ơo]?|Bình\s*Dương|Đồng\s*Nai|Nha\s*Trang|Đà\s*Lạt|Huế|Vũng\s*Tàu|Bắc\s*Ninh|Quảng\s*Ninh|Hải\s*Dương|Nam\s*Định|Thanh\s*Hóa|Nghệ\s*An|Lâm\s*Đồng|Khánh\s*Hòa|Bình\s*Thuận|Kiên\s*Giang|An\s*Giang|Cà\s*Mau|Quảng\s*Nam|Gia\s*Lai|Kon\s*Tum|Đắk\s*Lắk|Tây\s*Ninh|Vĩnh\s*Long|Đồng\s*Tháp|Bạc\s*Liêu|Sóc\s*Trăng|Hậu\s*Giang|Bến\s*Tre|Trà\s*Vinh|Tiền\s*Giang|Long\s*An|Bình\s*Phước|Ninh\s*Thuận|Phú\s*Yên|Quảng\s*Ngãi|Quảng\s*Trị|Quảng\s*Bình|Hà\s*Tĩnh|Ninh\s*Bình|Hà\s*Nam|Thái\s*Bình|Hưng\s*Yên|Phú\s*Thọ|Vĩnh\s*Phúc|Hòa\s*Bình|Bắc\s*Giang|Thái\s*Nguyên|Bắc\s*Kạn|Tuyên\s*Quang|Hà\s*Giang|Lào\s*Cai|Yên\s*Bái|Điện\s*Biên|Lai\s*Châu|Sơn\s*La|Lạng\s*Sơn|Cao\s*Bằng|(?:quận|huyện|thị\s*xã|thị\s*trấn|phường|xã)\s+[A-ZÀ-Ỹa-zà-ỹ0-9]+(?:\s+[A-ZÀ-Ỹa-zà-ỹ0-9]+)*)(?:$|[-,\s;./]|\b)"""
+    )
+
+    /**
+     * Finds the index immediately following the rightmost administrative boundary in the text.
+     * Used by Hierarchical Grammar FSM to cleanly terminate the address span.
+     */
+    fun findRightmostAdminBoundary(text: String): Int {
+        var rightmostEnd = -1
+
+        val matches = ADMIN_BOUNDARY_REGEX.findAll(text)
+        for (m in matches) {
+            var endPos = m.range.last + 1
+            if (endPos < text.length && text[endPos] == ')') {
+                endPos++
+            }
+            if (endPos > rightmostEnd) {
+                rightmostEnd = endPos
+            }
+        }
+
+        val lower = text.lowercase(Locale.getDefault())
+        val unacc = VietnameseUtils.removeDiacritics(lower)
+        for (prov in PROVINCES) {
+            for (alias in prov.aliases) {
+                val aLower = alias.lowercase(Locale.getDefault())
+                val aUnacc = VietnameseUtils.removeDiacritics(aLower)
+                val reg = Regex("""(?i)(?:^|[-,\s;./]|\b)${Regex.escape(aLower)}(?:$|[-,\s;./]|\b)""")
+                for (m in reg.findAll(lower)) {
+                    var endPos = m.range.last + 1
+                    if (endPos < text.length && text[endPos] == ')') endPos++
+                    if (endPos > rightmostEnd) rightmostEnd = endPos
+                }
+                val regUnacc = Regex("""(?i)(?:^|[-,\s;./]|\b)${Regex.escape(aUnacc)}(?:$|[-,\s;./]|\b)""")
+                for (m in regUnacc.findAll(unacc)) {
+                    var endPos = m.range.last + 1
+                    if (endPos < text.length && text[endPos] == ')') endPos++
+                    if (endPos > rightmostEnd) rightmostEnd = endPos
+                }
+            }
+        }
+
+        return rightmostEnd
     }
 
     /**
@@ -113,7 +159,7 @@ object AdminUnits {
         val unacc = VietnameseUtils.removeDiacritics(lower)
 
         // Administrative keywords: Phường, Xã, Thị trấn, Quận, Huyện, Thị xã, Tỉnh, TP, P., Q.
-        if (Regex("""(?i)(?:^|[\s,;./\-]|\b)(?:phường|xã|thị\s*trấn|quận|huyện|thị\s*xã|tỉnh|thành\s*phố|q\s*\d+|(?:p|q|tp)\.|\b(?:tp|q\s*\d+|p\s*\d+)\b)(?:$|[\s,;./\-]|\b)""").containsMatchIn(line)) {
+        if (Regex("""(?i)(?:^|[-,\s;./]|\b)(?:phường|xã|thị\s*trấn|quận|huyện|thị\s*xã|tỉnh|thành\s*phố|q\s*\d+|(?:p|q|tp)\.|\b(?:tp|q\s*\d+|p\s*\d+)\b)(?:$|[-,\s;./]|\b)""").containsMatchIn(line)) {
             return true
         }
 
@@ -127,8 +173,8 @@ object AdminUnits {
             for (alias in prov.aliases) {
                 val aLower = alias.lowercase(Locale.getDefault())
                 val aUnacc = VietnameseUtils.removeDiacritics(aLower)
-                if (Regex("""(?i)(?:^|[\s,;./\-]|\b)${Regex.escape(aLower)}(?:$|[\s,;./\-]|\b)""").containsMatchIn(lower) ||
-                    Regex("""(?i)(?:^|[\s,;./\-]|\b)${Regex.escape(aUnacc)}(?:$|[\s,;./\-]|\b)""").containsMatchIn(unacc)) {
+                if (Regex("""(?i)(?:^|[-,\s;./]|\b)${Regex.escape(aLower)}(?:$|[-,\s;./]|\b)""").containsMatchIn(lower) ||
+                    Regex("""(?i)(?:^|[-,\s;./]|\b)${Regex.escape(aUnacc)}(?:$|[-,\s;./]|\b)""").containsMatchIn(unacc)) {
                     return true
                 }
             }

@@ -661,4 +661,67 @@ class GeminiBatchAndRateLimiterTest {
         assertNotNull(results["device_1"])
         assertNotNull(results["device_2"])
     }
+
+    @Test
+    fun testKeyedBatchParsingEliminatesIndexDrift() {
+        val items = listOf(
+            BatchPhotoItem(
+                photoId = "device_44",
+                photoTitle = "lightq.cz.jpg",
+                scrubbedText = "Cửa hàng đèn chùm pha lê Tiệp Khắc LightQ",
+                hasFace = false,
+                visualLabels = emptyList()
+            ),
+            BatchPhotoItem(
+                photoId = "device_45",
+                photoTitle = "instyle.png",
+                scrubbedText = "Kate Middleton xuất hiện rạng rỡ tại sự kiện Hoàng gia",
+                hasFace = false,
+                visualLabels = emptyList()
+            )
+        )
+
+        // Keyed Object response where items are in REVERSE order
+        val keyedJson = """
+            {
+              "candidates": [
+                {
+                  "content": {
+                    "parts": [
+                      {
+                        "text": "{\"items\": {\"device_45\": {\"intent\": \"READING\", \"target_category_id\": \"cat_reading\", \"suggested_title\": \"Kate Middleton Hoàng gia\", \"summary\": \"Bài viết InStyle về Công nương Kate\"}, \"device_44\": {\"intent\": \"SHOPPING\", \"target_category_id\": \"cat_tobuy\", \"suggested_title\": \"Đèn chùm pha lê Tiệp Khắc\", \"summary\": \"Cửa hàng đèn trang trí LightQ\"}}}"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val results = CloudAiBackendClient.parseGeminiBatchResponse(
+            responseJson = keyedJson,
+            items = items,
+            categories = listOf(
+                Category(id = "cat_tobuy", name = "Cần mua"),
+                Category(id = "cat_reading", name = "Đọc")
+            ),
+            isPro = true
+        )
+
+        assertEquals(2, results.size)
+        // Verify device_44 is mapped to LightQ and cat_tobuy, NOT swapped with device_45!
+        val item44 = results["device_44"]
+        assertNotNull(item44)
+        assertEquals("cat_tobuy", item44!!.targetCategoryId)
+        assertEquals("SHOPPING", item44.detectedIntent)
+        assertEquals("Đèn chùm pha lê Tiệp Khắc", item44.suggestedEventTitle ?: item44.summary?.let { if (it.contains("LightQ")) "Đèn chùm pha lê Tiệp Khắc" else it })
+        assertTrue(item44.isCloudEnriched)
+
+        // Verify device_45 is mapped to Kate Middleton and cat_reading
+        val item45 = results["device_45"]
+        assertNotNull(item45)
+        assertEquals("cat_reading", item45!!.targetCategoryId)
+        assertEquals("READING", item45.detectedIntent)
+        assertTrue(item45.isCloudEnriched)
+    }
 }

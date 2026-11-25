@@ -33,7 +33,7 @@ class EncryptedPhotoFetcher(
         return SourceResult(
             source = ImageSource(source = bufferedSource, context = options.context),
             mimeType = mimeType,
-            dataSource = DataSource.DISK
+            dataSource = DataSource.MEMORY
         )
     }
 

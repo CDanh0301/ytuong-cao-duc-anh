@@ -6,30 +6,51 @@ import android.os.Build
 import android.provider.MediaStore
 import com.example.test2.shared.models.Folder
 import com.example.test2.shared.models.Photo
+import com.example.test2.shared.repository.PhotoRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 data class DeviceScanResult(
     val photos: List<Photo>,
-    val folders: List<Folder>
+    val folders: List<Folder>,
+    val physicalPaths: Map<String, String> = emptyMap()
 )
 
 class DeviceMediaScanner(private val context: Context) {
 
+    companion object {
+        fun resolveMediaTimestampMillis(
+            dateTakenMillis: Long,
+            dateAddedSec: Long,
+            dateModifiedSec: Long,
+            fallbackNowMillis: Long = System.currentTimeMillis()
+        ): Long {
+            return when {
+                dateTakenMillis > 0L -> dateTakenMillis
+                dateAddedSec > 0L -> dateAddedSec * 1000L
+                dateModifiedSec > 0L -> dateModifiedSec * 1000L
+                else -> fallbackNowMillis
+            }
+        }
+    }
+
     suspend fun scanDeviceImages(): DeviceScanResult = withContext(Dispatchers.IO) {
         val photos = mutableListOf<Photo>()
         val folderNames = mutableSetOf<String>()
+        val physicalPaths = mutableMapOf<String, String>()
 
         val projection = arrayOf(
             MediaStore.Images.Media._ID,
             MediaStore.Images.Media.DISPLAY_NAME,
             MediaStore.Images.Media.DATE_ADDED,
+            MediaStore.Images.Media.DATE_TAKEN,
+            MediaStore.Images.Media.DATE_MODIFIED,
             MediaStore.Images.Media.SIZE,
             MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
             MediaStore.Images.Media.DATA
         )
 
-        val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+        val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC, ${MediaStore.Images.Media._ID} DESC"
 
         try {
             val query = context.contentResolver.query(
@@ -44,6 +65,8 @@ class DeviceMediaScanner(private val context: Context) {
                 val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
                 val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
                 val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
+                val dateTakenColumn = cursor.getColumnIndex(MediaStore.Images.Media.DATE_TAKEN)
+                val dateModifiedColumn = cursor.getColumnIndex(MediaStore.Images.Media.DATE_MODIFIED)
                 val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
                 val bucketColumn = cursor.getColumnIndex(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
                 val dataColumn = cursor.getColumnIndex(MediaStore.Images.Media.DATA)
@@ -52,7 +75,17 @@ class DeviceMediaScanner(private val context: Context) {
                     val id = cursor.getLong(idColumn)
                     val name = cursor.getString(nameColumn) ?: "IMG_$id.jpg"
                     val dateAddedSeconds = cursor.getLong(dateColumn)
-                    val dateAddedMillis = if (dateAddedSeconds > 0) dateAddedSeconds * 1000L else System.currentTimeMillis()
+                    val dateTakenMillis = if (dateTakenColumn >= 0 && !cursor.isNull(dateTakenColumn)) {
+                        cursor.getLong(dateTakenColumn)
+                    } else 0L
+                    val dateModifiedSeconds = if (dateModifiedColumn >= 0 && !cursor.isNull(dateModifiedColumn)) {
+                        cursor.getLong(dateModifiedColumn)
+                    } else 0L
+                    val dateAddedMillis = resolveMediaTimestampMillis(
+                        dateTakenMillis = dateTakenMillis,
+                        dateAddedSec = dateAddedSeconds,
+                        dateModifiedSec = dateModifiedSeconds
+                    )
                     val size = cursor.getLong(sizeColumn)
                     val bucketName = if (bucketColumn >= 0) cursor.getString(bucketColumn) else null
                     val cleanFolder = if (bucketName.isNullOrBlank()) "Ảnh chụp màn hình" else bucketName.trim()
@@ -72,10 +105,14 @@ class DeviceMediaScanner(private val context: Context) {
                     ).toString()
 
                     val title = name.substringBeforeLast(".")
+                    val photoId = "device_$id"
+                    if (dataPath.isNotBlank()) {
+                        physicalPaths[photoId] = dataPath
+                    }
 
                     photos.add(
                         Photo(
-                            id = "device_$id",
+                            id = photoId,
                             fileName = name,
                             filePath = contentUri,
                             title = title,
@@ -122,7 +159,11 @@ class DeviceMediaScanner(private val context: Context) {
             )
         }
 
-        DeviceScanResult(photos = photos, folders = folders)
+        DeviceScanResult(
+            photos = photos.sortedWith(PhotoRepository.chronologicalDescComparator),
+            folders = folders,
+            physicalPaths = physicalPaths
+        )
     }
 
     private fun isScreenshotMedia(name: String, bucket: String, path: String): Boolean {

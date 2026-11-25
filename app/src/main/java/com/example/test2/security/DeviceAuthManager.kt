@@ -30,6 +30,15 @@ object DeviceAuthManager {
     }
 
     /**
+     * Checks specifically if the user has configured at least one secure lock screen (PIN, Pattern, Password, or Biometric).
+     * Prevents lockouts where BiometricPrompt fails with ERROR_NO_DEVICE_CREDENTIAL.
+     */
+    fun isDeviceSecure(context: Context): Boolean {
+        val keyguardManager = context.getSystemService(Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager
+        return keyguardManager?.isDeviceSecure == true
+    }
+
+    /**
      * Prompts the user to authenticate using device screen lock (fingerprint, face, or device PIN/pattern/password).
      */
     fun authenticate(

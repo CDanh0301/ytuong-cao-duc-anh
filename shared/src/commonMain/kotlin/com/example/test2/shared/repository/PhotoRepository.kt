@@ -10,6 +10,7 @@ import com.example.test2.shared.models.PhotoFilter
 import com.example.test2.shared.models.SortOption
 import com.example.test2.shared.models.UserAccountTier
 import com.example.test2.shared.utils.VietnameseUtils
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,13 +48,41 @@ data class PhotoAiMetadataUpdate(
     val newFilePath: String? = null,
     val newFileName: String? = null,
     val newFileSizeBytes: Long? = null,
-    val isCloudEnriched: Boolean? = null
+    val isCloudEnriched: Boolean? = null,
+    val forceUpdate: Boolean = false
 )
 
 class PhotoRepository(
     private val persistenceDriver: PersistenceDriver = InMemoryPersistenceDriver(),
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default)
 ) {
+    companion object {
+        private fun normalizedTitleKey(photo: Photo): String =
+            photo.title.trim().lowercase()
+
+        private fun normalizedFileNameKey(photo: Photo): String =
+            photo.fileName.removeSuffix(".enc").trim().lowercase()
+
+        /**
+         * Canonical chronological descending comparator shared across gallery filtering,
+         * device MediaStore sync, vault additions, and restore roundtrips.
+         * Deterministic tie-breakers avoid dependency on storage state (.enc vs content://) or list append order.
+         */
+        val chronologicalDescComparator: Comparator<Photo> = Comparator { a, b ->
+            val dateCmp = b.dateAdded.compareTo(a.dateAdded)
+            if (dateCmp != 0) return@Comparator dateCmp
+            val titleCmp = normalizedTitleKey(b).compareTo(normalizedTitleKey(a))
+            if (titleCmp != 0) return@Comparator titleCmp
+            val fileCmp = normalizedFileNameKey(b).compareTo(normalizedFileNameKey(a))
+            if (fileCmp != 0) return@Comparator fileCmp
+            b.id.compareTo(a.id)
+        }
+
+        val chronologicalAscComparator: Comparator<Photo> = Comparator { a, b ->
+            chronologicalDescComparator.compare(b, a)
+        }
+    }
+
     private val json = Json {
         ignoreUnknownKeys = true
         prettyPrint = true
@@ -160,14 +189,16 @@ class PhotoRepository(
                     val orderMap = idOrder.withIndex().associate { it.value to it.index }
                     result.sortedBy { orderMap[it.id] ?: Int.MAX_VALUE }
                 } else {
-                    result.sortedByDescending { it.dateAdded }
+                    result.sortedWith(chronologicalDescComparator)
                 }
             }
-            SortOption.DATE_ASC -> result.sortedBy { it.dateAdded }
-            SortOption.TITLE_ASC -> result.sortedBy { it.title.lowercase() }
-            SortOption.TITLE_DESC -> result.sortedByDescending { it.title.lowercase() }
+            SortOption.DATE_ASC -> result.sortedWith(chronologicalAscComparator)
+            SortOption.TITLE_ASC -> result.sortedWith(compareBy<Photo> { it.title.lowercase() }.then(chronologicalDescComparator))
+            SortOption.TITLE_DESC -> result.sortedWith(compareByDescending<Photo> { it.title.lowercase() }.then(chronologicalDescComparator))
         }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    private val initialLoadCompleted = CompletableDeferred<Unit>()
 
     init {
         scope.launch {
@@ -175,64 +206,76 @@ class PhotoRepository(
         }
     }
 
+    /**
+     * Suspends until the initial persistence load has completed so callers like
+     * device media scanning never reconcile against an uninitialized empty state.
+     */
+    suspend fun awaitInitialLoad() {
+        initialLoadCompleted.await()
+    }
+
     suspend fun loadInitialData(nowMillis: Long = 0L) {
-        val rawData = persistenceDriver.loadData()
-        if (!rawData.isNullOrBlank()) {
-            try {
-                val appData = json.decodeFromString<AppData>(rawData)
-                _photos.value = appData.photos.map { photo ->
-                    val migratedCats = photo.categoryIds.map { if (it == "cat_tasks") "cat_reading" else it }.toSet()
-                    val migratedIntent = if (photo.detectedIntent == "TASK") "READING" else photo.detectedIntent
-                    photo.copy(categoryIds = migratedCats, detectedIntent = migratedIntent)
-                }
+        try {
+            val rawData = persistenceDriver.loadData()
+            if (!rawData.isNullOrBlank()) {
+                try {
+                    val appData = json.decodeFromString<AppData>(rawData)
+                    _photos.value = appData.photos.map { photo ->
+                        val migratedCats = photo.categoryIds.map { if (it == "cat_tasks") "cat_reading" else it }.toSet()
+                        val migratedIntent = if (photo.detectedIntent == "TASK") "READING" else photo.detectedIntent
+                        photo.copy(categoryIds = migratedCats, detectedIntent = migratedIntent)
+                    }.sortedWith(chronologicalDescComparator)
 
-                val legacyFolderNames = mapOf(
-                    "folder_camera" to "Cuộn camera",
-                    "folder_screenshots" to "Ảnh chụp màn hình",
-                    "folder_favorites" to "Yêu thích",
-                    "folder_travel" to "Du lịch",
-                    "folder_work" to "Công việc & Tài liệu"
-                )
-                _folders.value = appData.folders.map { folder ->
-                    if (folder.id in legacyFolderNames && folder.name in listOf("Camera Roll", "Screenshots", "Favorites", "Travel", "Work & Docs")) {
-                        folder.copy(name = legacyFolderNames[folder.id] ?: folder.name)
-                    } else {
-                        folder
-                    }
-                }.ifEmpty { defaultFoldersList() }
+                    val legacyFolderNames = mapOf(
+                        "folder_camera" to "Cuộn camera",
+                        "folder_screenshots" to "Ảnh chụp màn hình",
+                        "folder_favorites" to "Yêu thích",
+                        "folder_travel" to "Du lịch",
+                        "folder_work" to "Công việc & Tài liệu"
+                    )
+                    _folders.value = appData.folders.map { folder ->
+                        if (folder.id in legacyFolderNames && folder.name in listOf("Camera Roll", "Screenshots", "Favorites", "Travel", "Work & Docs")) {
+                            folder.copy(name = legacyFolderNames[folder.id] ?: folder.name)
+                        } else {
+                            folder
+                        }
+                    }.ifEmpty { defaultFoldersList() }
 
-                val legacyCatNames = mapOf(
-                    "cat_events" to "Lịch & Sự kiện",
-                    "cat_tobuy" to "Cần mua & Chi tiêu",
-                    "cat_reading" to "Đọc & Tham khảo",
-                    "cat_nature" to "Thiên nhiên & Phong cảnh",
-                    "cat_personal" to "Cá nhân & Giấy tờ"
-                )
-                val loadedCategories = appData.categories.map { cat ->
-                    if (cat.id in legacyCatNames && cat.name in listOf("Events & Schedule", "To-Buy", "Tasks & To-Do", "Reading List", "Nature", "Personal")) {
-                        cat.copy(name = legacyCatNames[cat.id] ?: cat.name)
-                    } else {
-                        cat
-                    }
-                }.filterNot { it.id == "cat_tasks" }.toMutableList()
+                    val legacyCatNames = mapOf(
+                        "cat_events" to "Lịch & Sự kiện",
+                        "cat_tobuy" to "Cần mua & Chi tiêu",
+                        "cat_reading" to "Đọc & Tham khảo",
+                        "cat_nature" to "Thiên nhiên & Phong cảnh",
+                        "cat_personal" to "Cá nhân & Giấy tờ"
+                    )
+                    val loadedCategories = appData.categories.map { cat ->
+                        if (cat.id in legacyCatNames && cat.name in listOf("Events & Schedule", "To-Buy", "Tasks & To-Do", "Reading List", "Nature", "Personal")) {
+                            cat.copy(name = legacyCatNames[cat.id] ?: cat.name)
+                        } else {
+                            cat
+                        }
+                    }.filterNot { it.id == "cat_tasks" }.toMutableList()
 
-                val existingIds = loadedCategories.map { it.id }.toSet()
-                for (defaultCat in defaultCategoriesList()) {
-                    if (defaultCat.id !in existingIds) {
-                        loadedCategories.add(defaultCat)
+                    val existingIds = loadedCategories.map { it.id }.toSet()
+                    for (defaultCat in defaultCategoriesList()) {
+                        if (defaultCat.id !in existingIds) {
+                            loadedCategories.add(defaultCat)
+                        }
                     }
+                    _categories.value = loadedCategories
+                    _accountTier.value = appData.accountTier
+                    _agingSettings.value = appData.agingSettings
+                    if (nowMillis > 0L) {
+                        checkMonthlyQuotaReset(nowMillis)
+                    }
+                } catch (_: Exception) {
+                    seedDefaults(nowMillis)
                 }
-                _categories.value = loadedCategories
-                _accountTier.value = appData.accountTier
-                _agingSettings.value = appData.agingSettings
-                if (nowMillis > 0L) {
-                    checkMonthlyQuotaReset(nowMillis)
-                }
-            } catch (_: Exception) {
+            } else {
                 seedDefaults(nowMillis)
             }
-        } else {
-            seedDefaults(nowMillis)
+        } finally {
+            initialLoadCompleted.complete(Unit)
         }
     }
 
@@ -420,7 +463,8 @@ class PhotoRepository(
         isProcessed: Boolean = true,
         suggestedEventDescription: String? = null,
         semanticTags: List<String> = emptyList(),
-        isCloudEnriched: Boolean? = null
+        isCloudEnriched: Boolean? = null,
+        forceUpdate: Boolean = false
     ) {
         updatePhotoAiMetadataBatch(
             listOf(
@@ -435,7 +479,8 @@ class PhotoRepository(
                     isProcessed = isProcessed,
                     suggestedEventDescription = suggestedEventDescription,
                     semanticTags = semanticTags,
-                    isCloudEnriched = isCloudEnriched
+                    isCloudEnriched = isCloudEnriched,
+                    forceUpdate = forceUpdate
                 )
             )
         )
@@ -449,29 +494,34 @@ class PhotoRepository(
         _photos.value = _photos.value.map { photo ->
             val update = updateMap[photo.id]
             if (update != null) {
+                val isForced = update.forceUpdate
                 val isAlreadyCloudEnriched = photo.isCloudEnriched
-                val willBeCloudEnriched = update.isCloudEnriched ?: (isAlreadyCloudEnriched || !update.suggestedEventDescription.isNullOrBlank())
+                val willBeCloudEnriched = update.isCloudEnriched ?: (isForced || isAlreadyCloudEnriched || !update.suggestedEventDescription.isNullOrBlank())
 
-                val resolvedTitle = if (isAlreadyCloudEnriched && (update.suggestedEventTitle.isNullOrBlank() || isCrudeTitle(update.suggestedEventTitle))) {
+                val resolvedTitle = if (!isForced && isAlreadyCloudEnriched && (update.suggestedEventTitle.isNullOrBlank() || isCrudeTitle(update.suggestedEventTitle))) {
                     photo.suggestedEventTitle
                 } else {
                     update.suggestedEventTitle ?: photo.suggestedEventTitle
                 }
 
-                val resolvedDescription = if (isAlreadyCloudEnriched && update.suggestedEventDescription.isNullOrBlank()) {
+                val resolvedDescription = if (!isForced && isAlreadyCloudEnriched && update.suggestedEventDescription.isNullOrBlank()) {
                     photo.suggestedEventDescription
                 } else {
                     update.suggestedEventDescription ?: photo.suggestedEventDescription
                 }
 
-                val resolvedIntent = if (isAlreadyCloudEnriched && (update.detectedIntent.isNullOrBlank() || update.detectedIntent == "OTHER")) {
+                val resolvedIntent = if (!isForced && isAlreadyCloudEnriched && (update.detectedIntent.isNullOrBlank() || update.detectedIntent == "OTHER")) {
                     photo.detectedIntent
                 } else {
                     update.detectedIntent ?: photo.detectedIntent
                 }
 
-                val updatedCategories = if (update.targetCategoryId != null && (!isAlreadyCloudEnriched || update.targetCategoryId != "cat_other")) {
-                    (photo.categoryIds.filterNot { it in defaultCatIds } + update.targetCategoryId).toSet()
+                val updatedCategories = if (isForced || (update.targetCategoryId != null && (!isAlreadyCloudEnriched || update.targetCategoryId != "cat_other"))) {
+                    if (update.targetCategoryId != null) {
+                        (photo.categoryIds.filterNot { it in defaultCatIds } + update.targetCategoryId).toSet()
+                    } else {
+                        photo.categoryIds
+                    }
                 } else {
                     photo.categoryIds
                 }
@@ -526,7 +576,7 @@ class PhotoRepository(
             } else {
                 photo
             }
-        }
+        }.sortedWith(chronologicalDescComparator)
         persistData()
     }
 
@@ -624,16 +674,39 @@ class PhotoRepository(
         val processedIds = mutableSetOf<String>()
 
         for (scanned in scannedPhotos) {
-            // First check if this exact photo ID is already vaulted in private app storage (.enc)
             val existingSameId = existingById[scanned.id]
+
+            // 1. If scanned photo is newly vaulted (.enc), update storage path while preserving all AI & user metadata
+            if (scanned.filePath.endsWith(".enc")) {
+                if (existingSameId != null) {
+                    val updatedVaulted = existingSameId.copy(
+                        filePath = scanned.filePath,
+                        fileName = scanned.fileName,
+                        fileSizeBytes = scanned.fileSizeBytes,
+                        isScreenshot = true
+                    )
+                    mergedPhotos.add(updatedVaulted)
+                    processedPaths.add(updatedVaulted.filePath)
+                    processedIds.add(scanned.id)
+                    continue
+                } else {
+                    val targetFolderId = folderByName[scanned.folderId.lowercase()]?.id ?: defaultFolderId
+                    mergedPhotos.add(scanned.copy(folderId = targetFolderId))
+                    processedPaths.add(scanned.filePath)
+                    processedIds.add(scanned.id)
+                    continue
+                }
+            }
+
+            // 2. If photo is already vaulted (.enc) in repository, never allow obsolete public MediaStore content:// to overwrite it
             if (existingSameId != null && existingSameId.filePath.endsWith(".enc")) {
-                // Preserve the vaulted/protected version - do NOT let MediaStore content:// overwrite it!
                 mergedPhotos.add(existingSameId)
                 processedPaths.add(existingSameId.filePath)
                 processedIds.add(scanned.id)
                 continue
             }
 
+            // 3. Normal public photo reconciliation
             val existing = existingPhotoMap[scanned.filePath] ?: existingSameId
             if (existing != null) {
                 val updatedExisting = if (!existing.isScreenshot && scanned.isScreenshot) {
@@ -664,7 +737,7 @@ class PhotoRepository(
             }
         }
 
-        _photos.value = mergedPhotos
+        _photos.value = mergedPhotos.sortedWith(chronologicalDescComparator)
         persistData()
     }
 
@@ -686,7 +759,7 @@ class PhotoRepository(
     fun addPhoto(
         fileName: String,
         filePath: String,
-        title: String,
+        title: String = "",
         description: String = "",
         folderId: String? = null,
         categoryIds: Set<String> = emptySet(),
@@ -716,6 +789,20 @@ class PhotoRepository(
         _photos.value = listOf(photo) + _photos.value
         persistData()
         return photo
+    }
+
+    /**
+     * Batch inserts vaulted photos processed in the background into the repository memory cache.
+     * Preserves all AI metadata extracted while the app was closed.
+     */
+    fun addVaultedPhotos(newPhotos: List<Photo>) {
+        if (newPhotos.isEmpty()) return
+        val currentMap = _photos.value.associateBy { it.id }.toMutableMap()
+        for (p in newPhotos) {
+            currentMap[p.id] = p
+        }
+        _photos.value = currentMap.values.sortedWith(chronologicalDescComparator)
+        persistData()
     }
 
     fun updatePhoto(

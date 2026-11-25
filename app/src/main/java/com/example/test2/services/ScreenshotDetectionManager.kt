@@ -4,6 +4,7 @@ import android.content.ContentUris
 import android.content.Context
 import android.provider.MediaStore
 import com.example.test2.database.AppDatabaseHelper
+import com.example.test2.storage.DeviceMediaScanner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -40,10 +41,12 @@ object ScreenshotDetectionManager {
             MediaStore.Images.Media._ID,
             MediaStore.Images.Media.DISPLAY_NAME,
             MediaStore.Images.Media.DATE_ADDED,
+            MediaStore.Images.Media.DATE_TAKEN,
+            MediaStore.Images.Media.DATE_MODIFIED,
             MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
             MediaStore.Images.Media.DATA
         )
-        val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+        val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC, ${MediaStore.Images.Media._ID} DESC"
         val now = System.currentTimeMillis()
         // Window of 24 hours to catch screenshots taken while phone was off or app was suspended
         val cutoffMillis = now - (24 * 3600 * 1000L)
@@ -61,6 +64,8 @@ object ScreenshotDetectionManager {
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
                 val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
                 val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
+                val dateTakenCol = cursor.getColumnIndex(MediaStore.Images.Media.DATE_TAKEN)
+                val dateModCol = cursor.getColumnIndex(MediaStore.Images.Media.DATE_MODIFIED)
                 val bucketCol = cursor.getColumnIndex(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
                 val dataCol = cursor.getColumnIndex(MediaStore.Images.Media.DATA)
 
@@ -71,7 +76,14 @@ object ScreenshotDetectionManager {
                     val id = cursor.getLong(idCol)
                     val name = cursor.getString(nameCol) ?: ""
                     val dateAddedSec = cursor.getLong(dateCol)
-                    val dateAddedMillis = if (dateAddedSec > 0) dateAddedSec * 1000L else now
+                    val dateTakenMillis = if (dateTakenCol >= 0 && !cursor.isNull(dateTakenCol)) cursor.getLong(dateTakenCol) else 0L
+                    val dateModSec = if (dateModCol >= 0 && !cursor.isNull(dateModCol)) cursor.getLong(dateModCol) else 0L
+                    val dateAddedMillis = DeviceMediaScanner.resolveMediaTimestampMillis(
+                        dateTakenMillis = dateTakenMillis,
+                        dateAddedSec = dateAddedSec,
+                        dateModifiedSec = dateModSec,
+                        fallbackNowMillis = now
+                    )
                     val bucket = if (bucketCol >= 0) cursor.getString(bucketCol) ?: "" else ""
                     val path = if (dataCol >= 0) cursor.getString(dataCol) ?: "" else ""
 

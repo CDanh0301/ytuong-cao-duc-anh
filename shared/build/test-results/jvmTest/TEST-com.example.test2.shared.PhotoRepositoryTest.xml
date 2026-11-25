@@ -1,15 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="PhotoRepositoryTest[jvm]" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-11-13T08:10:45.626Z" hostname="VSF-0113Z4-L" time="0.269">
+<testsuite name="PhotoRepositoryTest[jvm]" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-11-25T05:30:15.596Z" hostname="VSF-0113Z4-L" time="0.281">
   <properties/>
-  <testcase name="testDateRangeAndSemanticTagsFiltering[jvm]" classname="com.example.test2.shared.PhotoRepositoryTest" time="0.218"/>
-  <testcase name="testReassignPhotosToCategoryReplacesOldCategories[jvm]" classname="com.example.test2.shared.PhotoRepositoryTest" time="0.01"/>
+  <testcase name="testDateRangeAndSemanticTagsFiltering[jvm]" classname="com.example.test2.shared.PhotoRepositoryTest" time="0.223"/>
+  <testcase name="testReassignPhotosToCategoryReplacesOldCategories[jvm]" classname="com.example.test2.shared.PhotoRepositoryTest" time="0.009"/>
   <testcase name="testReassignPhotosPreservesCalendarAndShoppingCapabilities[jvm]" classname="com.example.test2.shared.PhotoRepositoryTest" time="0.006"/>
-  <testcase name="testIdeaIntelligenceAndAging[jvm]" classname="com.example.test2.shared.PhotoRepositoryTest" time="0.007"/>
-  <testcase name="testScreenshotOnlySyncAndManualImportPreservation[jvm]" classname="com.example.test2.shared.PhotoRepositoryTest" time="0.005"/>
-  <testcase name="testDefaultsAndFolderCreation[jvm]" classname="com.example.test2.shared.PhotoRepositoryTest" time="0.002"/>
+  <testcase name="testIdeaIntelligenceAndAging[jvm]" classname="com.example.test2.shared.PhotoRepositoryTest" time="0.008"/>
+  <testcase name="testScreenshotOnlySyncAndManualImportPreservation[jvm]" classname="com.example.test2.shared.PhotoRepositoryTest" time="0.004"/>
+  <testcase name="testDefaultsAndFolderCreation[jvm]" classname="com.example.test2.shared.PhotoRepositoryTest" time="0.004"/>
   <testcase name="testMonthlyQuotaAutoReset[jvm]" classname="com.example.test2.shared.PhotoRepositoryTest" time="0.009"/>
-  <testcase name="testCustomAiCategoriesProEnforcement[jvm]" classname="com.example.test2.shared.PhotoRepositoryTest" time="0.004"/>
-  <testcase name="testAssignPhotosToCategory[jvm]" classname="com.example.test2.shared.PhotoRepositoryTest" time="0.003"/>
+  <testcase name="testCustomAiCategoriesProEnforcement[jvm]" classname="com.example.test2.shared.PhotoRepositoryTest" time="0.003"/>
+  <testcase name="testForceUpdateOverridesEnrichedPhoto[jvm]" classname="com.example.test2.shared.PhotoRepositoryTest" time="0.004"/>
+  <testcase name="testAssignPhotosToCategory[jvm]" classname="com.example.test2.shared.PhotoRepositoryTest" time="0.005"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

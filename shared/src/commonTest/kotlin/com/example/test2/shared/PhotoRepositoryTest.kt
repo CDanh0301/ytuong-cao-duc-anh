@@ -474,4 +474,56 @@ class PhotoRepositoryTest {
         assertFalse(photos.any { it.filePath == legacyCameraPhoto.filePath })
         assertEquals(2, photos.size)
     }
+
+    @Test
+    fun testForceUpdateOverridesEnrichedPhoto() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(testDispatcher)
+        val driver = InMemoryPersistenceDriver()
+        val repo = PhotoRepository(driver, scope)
+        testScheduler.advanceUntilIdle()
+
+        // 1. Add photo that is already cloud enriched
+        val photo = repo.addPhoto(
+            fileName = "Screenshot_Dining.png",
+            filePath = "file:///photos/dining.png",
+            fileSizeBytes = 2048L,
+            dateAdded = 1000L,
+            isScreenshot = true
+        )
+        repo.updatePhotoAiMetadata(
+            photoId = photo.id,
+            isScreenshot = true,
+            piiScrubbedText = "Moo Beef Steak",
+            detectedIntent = "EVENT",
+            suggestedEventTitle = "Lịch khám bệnh",
+            targetCategoryId = "cat_events",
+            isCloudEnriched = true
+        )
+        testScheduler.advanceUntilIdle()
+
+        val initialPhoto = repo.photos.value.first { it.id == photo.id }
+        assertTrue(initialPhoto.isCloudEnriched)
+        assertEquals("EVENT", initialPhoto.detectedIntent)
+        assertTrue(initialPhoto.categoryIds.contains("cat_events"))
+
+        // 2. Perform a forced manual rescan with forceUpdate = true
+        repo.updatePhotoAiMetadata(
+            photoId = photo.id,
+            isScreenshot = true,
+            piiScrubbedText = "Moo Beef Steak",
+            detectedIntent = "SHOPPING",
+            suggestedEventTitle = "Moo Beef Steak Trần Quốc Toản",
+            targetCategoryId = "cat_tobuy",
+            isCloudEnriched = true,
+            forceUpdate = true
+        )
+        testScheduler.advanceUntilIdle()
+
+        val updatedPhoto = repo.photos.value.first { it.id == photo.id }
+        assertEquals("SHOPPING", updatedPhoto.detectedIntent)
+        assertEquals("Moo Beef Steak Trần Quốc Toản", updatedPhoto.suggestedEventTitle)
+        assertTrue(updatedPhoto.categoryIds.contains("cat_tobuy"))
+        assertFalse(updatedPhoto.categoryIds.contains("cat_events"))
+    }
 }

@@ -168,14 +168,20 @@ class ScreenshotQueueWorker(
                 var currentFilePath = item.filePath
                 var currentFileName = item.originalFileName ?: item.filePath.substringAfterLast("/")
 
-                // If Privacy Vault mode is active and screenshot falls within configured scope, seamlessly move and encrypt
-                if (PrivacyVaultManager.shouldVaultScreenshot(context, item.dateAdded) && !currentFilePath.endsWith(".enc")) {
+                // If Privacy Vault mode is active and screenshot is eligible for auto-vault, seamlessly move and encrypt
+                if (PrivacyVaultManager.shouldAutoVaultPhoto(context, item.photoId, item.dateAdded) && !currentFilePath.endsWith(".enc")) {
                     val uri = if (currentFilePath.startsWith("content://")) Uri.parse(currentFilePath) else null
                     val vaultResult = PrivacyVaultManager.vaultAndEvictScreenshot(context, uri, currentFilePath, currentFileName)
                     if (vaultResult != null) {
                         currentFilePath = vaultResult.newFilePath
                         currentFileName = vaultResult.newFileName
-                        dbHelper.syncVaultedPathToQueue(item.photoId, currentFilePath)
+                        dbHelper.syncVaultedPathToQueue(
+                            photoId = item.photoId,
+                            newFilePath = currentFilePath,
+                            dateAdded = item.dateAdded,
+                            photoTitle = item.photoTitle,
+                            originalFileName = item.originalFileName
+                        )
                     }
                 }
 
@@ -301,9 +307,13 @@ class ScreenshotQueueWorker(
 
                 // Get parsed data from Cloud results or on-device SmartHeuristicParser
                 val parsed = if (prep.needsCloudAnalysis && cloudResults.containsKey(item.photoId)) {
-                    cloudResults[item.photoId]!!
+                    val res = cloudResults[item.photoId]!!
+                    if (!res.isCloudEnriched && aiConfig.isEnabled && aiConfig.apiKey.isNotBlank()) {
+                        hasCloudUpgradePending = true
+                    }
+                    res
                 } else {
-                    if (aiConfig.isEnabled && aiConfig.apiKey.isNotBlank() && !isOnline && prep.needsCloudAnalysis) {
+                    if (aiConfig.isEnabled && aiConfig.apiKey.isNotBlank() && prep.needsCloudAnalysis) {
                         hasCloudUpgradePending = true
                     }
                     SmartHeuristicParser.parse(

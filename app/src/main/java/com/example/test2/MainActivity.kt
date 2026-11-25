@@ -4,7 +4,11 @@ import android.Manifest
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.widget.Toast
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
 import androidx.fragment.app.FragmentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -139,11 +143,20 @@ class MainActivity : FragmentActivity() {
                 val isRestoringPhotos by viewModel.isRestoringPhotos.collectAsState()
                 val restoreProgress by viewModel.restoreProgress.collectAsState()
                 val restoreSuccessBanner by viewModel.showRestoreSuccessBanner.collectAsState()
+                val showRequireDeviceLockDialog by viewModel.showRequireDeviceLockDialog.collectAsState()
+                val vaultPermissionDeniedBanner by viewModel.showVaultPermissionDeniedBanner.collectAsState()
 
                 LaunchedEffect(restoreSuccessBanner) {
                     restoreSuccessBanner?.let { msg ->
                         Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
                         viewModel.dismissRestoreSuccessBanner()
+                    }
+                }
+
+                LaunchedEffect(vaultPermissionDeniedBanner) {
+                    vaultPermissionDeniedBanner?.let { msg ->
+                        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
+                        viewModel.dismissVaultPermissionDeniedBanner()
                     }
                 }
 
@@ -185,14 +198,13 @@ class MainActivity : FragmentActivity() {
                         when (event) {
                             Lifecycle.Event.ON_RESUME -> {
                                 if (viewModel.hasStoragePermission.value) {
-                                    viewModel.checkVaultPermissionResumed()
-                                    viewModel.scanDevicePhotos()
+                                    viewModel.onResumeScan()
                                     viewModel.ensureVectorsIndexed()
                                 }
                             }
                             Lifecycle.Event.ON_STOP -> {
                                 if (viewModel.isVaultEnabled.value) {
-                                    viewModel.lockApp()
+                                    viewModel.notifyAppBackgrounded()
                                 }
                             }
                             else -> {}
@@ -218,7 +230,12 @@ class MainActivity : FragmentActivity() {
                         onUnlockClick = {
                             DeviceAuthManager.authenticate(
                                 activity = this@MainActivity,
-                                onSuccess = { viewModel.unlockApp() }
+                                onSuccess = { viewModel.unlockApp() },
+                                onError = { errorCode, _ ->
+                                    if (errorCode == androidx.biometric.BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL) {
+                                        Toast.makeText(this@MainActivity, "Thiết bị chưa cài đặt mã khóa màn hình (PIN/Vân tay). Vui lòng thiết lập trong Cài đặt của máy.", Toast.LENGTH_LONG).show()
+                                    }
+                                }
                             )
                         },
                         onBackPressed = {
@@ -504,6 +521,12 @@ class MainActivity : FragmentActivity() {
                         },
                         onScanPhoto = { photoId ->
                             viewModel.scanSinglePhoto(photoId)
+                        },
+                        onRestoreSinglePhoto = { photoToRestore ->
+                            viewModel.restoreSinglePhoto(photoToRestore)
+                        },
+                        onVaultSinglePhoto = { photoToVault ->
+                            viewModel.vaultSinglePhoto(photoToVault)
                         }
                     )
                 }
@@ -591,7 +614,35 @@ class MainActivity : FragmentActivity() {
                         }
                         viewModel.dismissAllFilesAccessDialog()
                     },
-                    onDismiss = { viewModel.dismissAllFilesAccessDialog() }
+                    onDismiss = { viewModel.cancelAllFilesAccessDialog() }
+                )
+            }
+
+            // Require Device Lock Dialog (when device has no screen PIN/password/biometric)
+            if (showRequireDeviceLockDialog) {
+                AlertDialog(
+                    onDismissRequest = { viewModel.dismissRequireDeviceLockDialog() },
+                    title = { Text("Yêu cầu Khóa màn hình", fontWeight = FontWeight.Bold) },
+                    text = { Text("Để bảo vệ ảnh trong Két an toàn, thiết bị của bạn cần phải cài đặt sẵn Khóa màn hình (Mã PIN, Hình vẽ hoặc Vân tay). Vui lòng thiết lập khóa máy trước khi bật tính năng này.") },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                viewModel.dismissRequireDeviceLockDialog()
+                                try {
+                                    startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
+                                } catch (_: Exception) {
+                                    startActivity(Intent(Settings.ACTION_SETTINGS))
+                                }
+                            }
+                        ) {
+                            Text("Cài đặt khóa máy")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { viewModel.dismissRequireDeviceLockDialog() }) {
+                            Text("Để sau")
+                        }
+                    }
                 )
             }
 

@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -159,6 +160,8 @@ fun PhotoGalleryScreen(
         else -> "Tất cả ảnh"
     }
 
+    val displayPhotos = photos
+
     val hasActiveFilter = currentFilter.folderId != null ||
             currentFilter.categoryId != null ||
             currentFilter.onlyFavorites ||
@@ -192,7 +195,7 @@ fun PhotoGalleryScreen(
                         color = Color(0xFF0F172A)
                     )
                     Text(
-                        text = "${photos.size} ảnh",
+                        text = "${displayPhotos.size} ảnh",
                         fontSize = 13.sp,
                         color = Color(0xFF64748B)
                     )
@@ -657,7 +660,7 @@ fun PhotoGalleryScreen(
         }
 
         // Photos Grid or Empty State
-        if (photos.isEmpty()) {
+        if (displayPhotos.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -772,7 +775,7 @@ fun PhotoGalleryScreen(
                                     .padding(horizontal = 8.dp, vertical = 2.dp)
                             ) {
                                 Text(
-                                    text = "${photos.size}",
+                                    text = "${displayPhotos.size}",
                                     fontSize = 11.5.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = Color(0xFF475569)
@@ -788,7 +791,7 @@ fun PhotoGalleryScreen(
                     }
                 }
 
-                items(photos, key = { it.id }) { photo ->
+                items(displayPhotos, key = { it.id }) { photo ->
                     val semanticScore = semanticMatchScores[photo.id]
                     when (displayMode) {
                         GalleryDisplayMode.BIG_PREVIEW -> {
@@ -1091,6 +1094,25 @@ fun PhotoBigPreviewCard(
                     }
                 }
 
+                // Privacy Vault Shield Badge
+                if (photo.filePath.endsWith(".enc")) {
+                    Box(
+                        modifier = Modifier
+                            .align(if (semanticScore != null && semanticScore >= 0.28f) Alignment.BottomStart else Alignment.TopStart)
+                            .padding(6.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xCC0F172A))
+                            .padding(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = "Đã mã hóa trong Két",
+                            tint = Color(0xFF22C55E),
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
+                }
+
                 // Favorite Heart Overlay in Top-Right
                 Box(
                     modifier = Modifier
@@ -1262,6 +1284,25 @@ fun PhotoSmallPreviewCard(
                     }
                 }
 
+                // Privacy Vault Shield Badge
+                if (photo.filePath.endsWith(".enc")) {
+                    Box(
+                        modifier = Modifier
+                            .align(if (semanticScore != null && semanticScore >= 0.28f) Alignment.BottomStart else Alignment.TopStart)
+                            .padding(3.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xCC0F172A))
+                            .padding(2.5.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = "Đã mã hóa trong Két",
+                            tint = Color(0xFF22C55E),
+                            modifier = Modifier.size(10.dp)
+                        )
+                    }
+                }
+
                 // Favorite Heart Overlay in Top-Right
                 if (photo.isFavorite) {
                     Box(
@@ -1385,6 +1426,25 @@ fun PhotoListRowCard(
                             fontSize = 8.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
+                        )
+                    }
+                }
+
+                // Privacy Vault Shield Badge
+                if (photo.filePath.endsWith(".enc")) {
+                    Box(
+                        modifier = Modifier
+                            .align(if (semanticScore != null && semanticScore >= 0.28f) Alignment.BottomStart else Alignment.TopStart)
+                            .padding(3.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xCC0F172A))
+                            .padding(2.5.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = "Đã mã hóa trong Két",
+                            tint = Color(0xFF22C55E),
+                            modifier = Modifier.size(11.dp)
                         )
                     }
                 }

@@ -18,7 +18,8 @@ data class ParsedScreenshotData(
     val semanticTags: List<String> = emptyList(),
     val summary: String? = null,
     val entities: Map<String, String> = emptyMap(),
-    val itemsToBuy: List<String> = emptyList()
+    val itemsToBuy: List<String> = emptyList(),
+    val isCloudEnriched: Boolean = false
 )
 
 object SmartHeuristicParser {
@@ -360,12 +361,20 @@ object SmartHeuristicParser {
         val explicitCartCues = listOf("gio hang", "them vao gio", "mua ngay", "dat hang", "don hang")
         val hasExplicitCart = explicitCartCues.any { unaccentedCombined.contains(it) }
 
+        // Commercial Venues, Dining & POI Detection (Restaurants, Cafes, Spas, Salons, Maps Cards)
+        val poiVenueCues = listOf("quan", "nha hang", "quan an", "ca phe", "cafe", "bit tet", "sushi", "mon an", "am thuc", "bistro", "bakery", "tiem", "khach san", "homestay", "spa", "salon")
+        val poiOperationalCues = listOf("dang mo cua", "dong cua vao", "mo lai vao", "xem thuc don", "thuc don", "dat ban", "chi duong", "duong di", "d/nguoi", "bai danh gia", "tong quan", "maps/place")
+        val hasPoiVenue = poiVenueCues.any { unaccentedCombined.contains(it) }
+        val poiOperationalMatchCount = poiOperationalCues.count { unaccentedCombined.contains(it) }
+        val isCommercialPoi = hasPoiVenue && poiOperationalMatchCount >= 2
+
         var rawShoppingScore = countMatches(combined, unaccentedCombined, tokens, unaccentedTokens, SHOPPING_KEYWORDS) * 2 +
                 countMatches(combined, unaccentedCombined, tokens, unaccentedTokens, PRODUCT_KEYWORDS) * 2
         if (hasPrice) rawShoppingScore += 6
         if (hasEcomSite) rawShoppingScore += 6
-        // News articles, press reports, or timetables must NEVER have shopping score unless explicit cart is present
-        val shoppingScore = if ((isNews || isTimetable) && !hasExplicitCart) 0 else rawShoppingScore
+        if (isCommercialPoi) rawShoppingScore += 25
+        // News articles, press reports, or timetables must NEVER have shopping score unless explicit cart is present or commercial POI
+        val shoppingScore = if ((isNews || isTimetable) && !hasExplicitCart && !isCommercialPoi) 0 else rawShoppingScore
 
         // 2. Calculate Personal Score
         val hasExplicitIdentityDoc = IDENTITY_DOC_SIGNATURES.any { unaccentedCombined.contains(it) }
@@ -598,6 +607,7 @@ object SmartHeuristicParser {
         val unaccented = VietnameseUtils.removeDiacritics(lower)
 
         if (isStatusBarLine(trimmed)) return true
+        if (lower.contains("★") || lower.contains("⭐") || lower.contains("★*")) return true
         if (lower.matches(Regex("""^\*?\d+(\.\d+)?\s*(\([^\)]+\))?$"""))) return true
         if (lower.matches(Regex("""^[0-9\s\.\-\(\)\+]{7,}$"""))) return true
         if (lower.matches(Regex("""^[0-9:.\\sAPMapm]+$"""))) return true
@@ -609,6 +619,8 @@ object SmartHeuristicParser {
             "binh luan", "chia se", "tin nhan", "tai khoan", "thanh toan", "mua ngay", "them vao gio",
             "giao hang", "van chuyen", "tong quan", "mo ta", "xem them", "dong", "huy", "luu",
             "yeu thich", "bo suu tap", "chon mua", "tra gop", "free download", "download",
+            "duong di", "goi dien", "dat ban", "bai danh gia", "xem thuc don", "trang web",
+            "dat den lay", "dat qua mang", "dat giao tan noi",
             "tag:", "tag", "tags", "c12", "mne stlos", "doar sihye", "u som 04.05202"
         )
         if (unaccented in exactUiWords) return true
@@ -673,6 +685,13 @@ object SmartHeuristicParser {
                     )
                     for (brand in brands) {
                         if (lower.contains(brand) || unacc.contains(brand)) {
+                            score += 10
+                            break
+                        }
+                    }
+                    val poiVenues = listOf("quan", "nha hang", "steak", "kitchen", "cuisine", "bit tet", "sushi", "cafe", "ca phe", "bistro", "bakery", "tiem")
+                    for (poi in poiVenues) {
+                        if (unacc.contains(poi)) {
                             score += 10
                             break
                         }

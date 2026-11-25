@@ -299,4 +299,58 @@ class ContextualClassificationTest {
 
         assertEquals("cat_custom_vehicles", parsed.targetCategoryId)
     }
+
+    @Test
+    fun testDiningAndMapsCategorizationConsistency() {
+        val samples = listOf(
+            """
+                Tung's Kitchen Vietnamese Cuisine & Vegetarian Food
+                4,9 ★ (22,2 N) Món ăn Việt Nam Mở cửa
+                Tổng quan Gọi điện Menu Đường đi Đặt đến lấy
+                Xem thực đơn
+                Đang mở cửa · Đóng cửa vào 22:30
+                2 P. Hàng Bông, Phố cổ Hà Nội
+                100.000-300.000 đ/người
+                22.199 Bài đánh giá
+            """.trimIndent(),
+            """
+                MOO BEEF STEAK TRẦN QUỐC TOẢN
+                4,9 ★ (6 N) Nhà hàng Mở cửa
+                Tổng quan Gọi điện Bài đánh giá Đường đi
+                Xem thực đơn Đặt bàn
+                Đang mở cửa Đóng cửa vào 14:00 Mở lại vào 17:30
+                59A P. Trần Quốc Toản, P. Cửa Nam, Hà Nội
+                5.983 Bài đánh giá
+            """.trimIndent(),
+            """
+                Le Monde Steak - Vincom Bà Triệu
+                4,6 ★ (799) Bít tết Mở cửa
+                Tổng quan Gọi điện Bài đánh giá Đường đi
+                Đặt qua mạng Xem thực đơn
+                Đang mở cửa · Đóng cửa vào 22:00
+                Vincom Center, Bà Triệu, Hai Bà Trưng, Hà Nội
+                100.000-600.000 đ/người
+                799 Bài đánh giá
+            """.trimIndent(),
+            """
+                Sushi Việt Gỏi Cuốn Việt
+                4,5 ★ (602) Món ăn xuyên Á Mở cửa
+                Tổng quan Gọi điện Bài đánh giá Đường đi
+                Xem thực đơn
+                Đang mở cửa Đóng cửa vào 22:00
+                151 Trần Đại Nghĩa, Bạch Mai, Hà Nội
+                100.000-200.000 đ/người
+                602 Bài đánh giá
+            """.trimIndent()
+        )
+
+        for (sample in samples) {
+            val parsed = SmartHeuristicParser.parse(
+                scrubbedText = sample,
+                photoTitle = "Screenshot_GoogleMaps.png"
+            )
+            assertEquals("All dining & maps places must consistently classify into cat_tobuy", "cat_tobuy", parsed.targetCategoryId)
+            assertEquals("All dining & maps places must have SHOPPING intent", "SHOPPING", parsed.detectedIntent)
+        }
+    }
 }

@@ -70,6 +70,8 @@ import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.LockOpen
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -81,6 +83,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -821,7 +824,9 @@ fun PhotoSettingsDialog(
     onDismiss: () -> Unit,
     onSave: (title: String, description: String, folderId: String, categoryIds: Set<String>, isFavorite: Boolean) -> Unit,
     onDelete: (Photo) -> Unit,
-    onScanPhoto: ((String) -> Unit)? = null
+    onScanPhoto: ((String) -> Unit)? = null,
+    onRestoreSinglePhoto: ((Photo) -> Unit)? = null,
+    onVaultSinglePhoto: ((Photo) -> Unit)? = null
 ) {
     var title by remember { mutableStateOf(TextFieldValue(photo.title, selection = TextRange(photo.title.length))) }
     var description by remember { mutableStateOf(photo.description) }
@@ -1047,6 +1052,73 @@ fun PhotoSettingsDialog(
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Xóa", fontSize = 13.sp, color = Color(0xFFEF4444))
                     }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Privacy Vault Single Photo Action (Vault / Restore)
+                val isVaulted = photo.filePath.endsWith(".enc")
+                var showVaultConfirmDialog by remember { mutableStateOf(false) }
+
+                OutlinedButton(
+                    onClick = { showVaultConfirmDialog = true },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = if (isVaulted) Color(0xFF0284C7) else Color(0xFF4F46E5)
+                    )
+                ) {
+                    Icon(
+                        imageVector = if (isVaulted) Icons.Outlined.LockOpen else Icons.Default.Lock,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (isVaulted) "Khôi phục ảnh về Bộ sưu tập" else "Chuyển ảnh vào Két bảo mật",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                if (showVaultConfirmDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showVaultConfirmDialog = false },
+                        title = {
+                            Text(
+                                text = if (isVaulted) "Khôi phục ảnh về máy?" else "Chuyển vào Két bảo mật?",
+                                fontWeight = FontWeight.Bold
+                            )
+                        },
+                        text = {
+                            Text(
+                                text = if (isVaulted)
+                                    "Ảnh sẽ được giải mã và lưu lại vào thư viện ảnh công khai của thiết bị."
+                                else
+                                    "Ảnh sẽ được mã hóa an toàn và chỉ có thể truy cập khi mở khóa ứng dụng."
+                            )
+                        },
+                        confirmButton = {
+                            Button(
+                                onClick = {
+                                    showVaultConfirmDialog = false
+                                    onDismiss()
+                                    if (isVaulted) {
+                                        onRestoreSinglePhoto?.invoke(photo)
+                                    } else {
+                                        onVaultSinglePhoto?.invoke(photo)
+                                    }
+                                }
+                            ) {
+                                Text("Đồng ý")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showVaultConfirmDialog = false }) {
+                                Text("Hủy")
+                            }
+                        }
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))

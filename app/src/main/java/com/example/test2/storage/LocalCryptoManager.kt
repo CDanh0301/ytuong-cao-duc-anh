@@ -10,7 +10,6 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.security.KeyStore
-import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.CipherInputStream
 import javax.crypto.CipherOutputStream
@@ -40,8 +39,6 @@ object LocalCryptoManager {
     // Note: ByteArray cannot be `const` in Kotlin. This is effectively immutable — do NOT modify.
     // Magic 4-byte header identifying encrypted payloads: 'E', 'N', 'C', '1'
     private val MAGIC_HEADER = byteArrayOf(0x45, 0x4E, 0x43, 0x31)
-
-    private val secureRandom = SecureRandom()
 
     // Deterministic fallback key for JVM unit tests where AndroidKeyStore is not mocked
     private val fallbackKey: SecretKey by lazy {
@@ -95,14 +92,24 @@ object LocalCryptoManager {
         }
     }
 
+    private fun initEncryptCipher(): Pair<Cipher, ByteArray> {
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        // AndroidKeyStore enforces setRandomizedEncryptionRequired(true) by default and
+        // rejects caller-supplied IVs during ENCRYPT_MODE; let the provider generate the IV.
+        cipher.init(Cipher.ENCRYPT_MODE, getSecretKey())
+        val iv = cipher.iv
+        require(iv != null && iv.size == GCM_IV_LENGTH) {
+            "Unexpected GCM IV length from Cipher: ${iv?.size}"
+        }
+        return cipher to iv
+    }
+
     /**
      * Encrypts raw bytes using AES-256-GCM.
      * Output format: [MAGIC (4B)] + [IV (12B)] + [Ciphertext + Auth Tag]
      */
     fun encrypt(plainBytes: ByteArray): ByteArray {
-        val iv = ByteArray(GCM_IV_LENGTH).apply { secureRandom.nextBytes(this) }
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, getSecretKey(), GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv))
+        val (cipher, iv) = initEncryptCipher()
         val ciphertext = cipher.doFinal(plainBytes)
 
         val output = ByteArrayOutputStream(MAGIC_HEADER.size + iv.size + ciphertext.size)
@@ -138,16 +145,21 @@ object LocalCryptoManager {
      * Streams unencrypted source into an encrypted physical file on disk.
      */
     fun encryptStreamToFile(sourceInput: InputStream, destinationFile: File) {
-        val iv = ByteArray(GCM_IV_LENGTH).apply { secureRandom.nextBytes(this) }
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, getSecretKey(), GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv))
-
-        FileOutputStream(destinationFile).use { fileOut ->
-            fileOut.write(MAGIC_HEADER)
-            fileOut.write(iv)
-            CipherOutputStream(fileOut, cipher).use { cipherOut ->
-                sourceInput.copyTo(cipherOut)
+        val (cipher, iv) = initEncryptCipher()
+        try {
+            FileOutputStream(destinationFile).use { fileOut ->
+                fileOut.write(MAGIC_HEADER)
+                fileOut.write(iv)
+                CipherOutputStream(fileOut, cipher).use { cipherOut ->
+                    sourceInput.copyTo(cipherOut)
+                    cipherOut.flush()
+                }
             }
+        } catch (t: Throwable) {
+            if (destinationFile.exists()) {
+                try { destinationFile.delete() } catch (_: Exception) {}
+            }
+            throw t
         }
     }
 
