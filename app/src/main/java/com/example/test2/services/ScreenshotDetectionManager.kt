@@ -5,6 +5,7 @@ import android.content.Context
 import android.provider.MediaStore
 import com.example.test2.database.AppDatabaseHelper
 import com.example.test2.storage.DeviceMediaScanner
+import com.example.test2.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -113,7 +114,8 @@ object ScreenshotDetectionManager {
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.w("ScreenshotDetectionMgr", "Failed to query MediaStore screenshots", e)
         }
 
         if (enqueuedCount > 0) {

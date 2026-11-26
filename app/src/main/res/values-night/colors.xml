@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Home Screen Search Widget (Dark Mode: translucent dark surface with legible contrast) -->
+    <color name="widget_bg_fill">#D91E293B</color>
+    <color name="widget_bg_stroke">#33FFFFFF</color>
+    <color name="widget_divider">#26FFFFFF</color>
+    <color name="widget_text_primary">#F8FAFC</color>
+    <color name="widget_text_hint">#CBD5E1</color>
+    <color name="widget_icon_primary">#60A5FA</color>
+    <color name="widget_icon_muted">#94A3B8</color>
+    <color name="widget_pro_bg">#33A855F7</color>
+    <color name="widget_pro_text">#E9D5FF</color>
+    <color name="widget_chip_address_bg">#33EF4444</color>
+    <color name="widget_chip_address_text">#FCA5A5</color>
+    <color name="widget_chip_payment_bg">#330EA5E9</color>
+    <color name="widget_chip_payment_text">#7DD3FC</color>
+    <color name="widget_chip_contact_bg">#338B5CF6</color>
+    <color name="widget_chip_contact_text">#DDD6FE</color>
+</resources>

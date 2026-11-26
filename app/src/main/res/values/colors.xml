@@ -7,4 +7,21 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- Home Screen Search Widget (Light Mode: translucent frosted white) -->
+    <color name="widget_bg_fill">#E6FFFFFF</color>
+    <color name="widget_bg_stroke">#260F172A</color>
+    <color name="widget_divider">#1A0F172A</color>
+    <color name="widget_text_primary">#0F172A</color>
+    <color name="widget_text_hint">#475569</color>
+    <color name="widget_icon_primary">#2563EB</color>
+    <color name="widget_icon_muted">#64748B</color>
+    <color name="widget_pro_bg">#1F8B5CF6</color>
+    <color name="widget_pro_text">#7E22CE</color>
+    <color name="widget_chip_address_bg">#1AEF4444</color>
+    <color name="widget_chip_address_text">#B91C1C</color>
+    <color name="widget_chip_payment_bg">#1A0EA5E9</color>
+    <color name="widget_chip_payment_text">#0369A1</color>
+    <color name="widget_chip_contact_bg">#1A8B5CF6</color>
+    <color name="widget_chip_contact_text">#6D28D9</color>
 </resources>

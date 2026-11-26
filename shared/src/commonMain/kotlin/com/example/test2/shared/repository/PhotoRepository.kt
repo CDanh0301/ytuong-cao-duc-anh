@@ -55,7 +55,7 @@ data class PhotoAiMetadataUpdate(
 class PhotoRepository(
     private val persistenceDriver: PersistenceDriver = InMemoryPersistenceDriver(),
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default)
-) {
+) : IPhotoRepository {
     companion object {
         private fun normalizedTitleKey(photo: Photo): String =
             photo.title.trim().lowercase()
@@ -90,112 +90,37 @@ class PhotoRepository(
     }
 
     private val _photos = MutableStateFlow<List<Photo>>(emptyList())
-    val photos: StateFlow<List<Photo>> = _photos.asStateFlow()
+    override val photos: StateFlow<List<Photo>> = _photos.asStateFlow()
 
     private val _folders = MutableStateFlow<List<Folder>>(emptyList())
-    val folders: StateFlow<List<Folder>> = _folders.asStateFlow()
+    override val folders: StateFlow<List<Folder>> = _folders.asStateFlow()
 
     private val _categories = MutableStateFlow<List<Category>>(emptyList())
-    val categories: StateFlow<List<Category>> = _categories.asStateFlow()
+    override val categories: StateFlow<List<Category>> = _categories.asStateFlow()
 
     private val _accountTier = MutableStateFlow(UserAccountTier())
-    val accountTier: StateFlow<UserAccountTier> = _accountTier.asStateFlow()
+    override val accountTier: StateFlow<UserAccountTier> = _accountTier.asStateFlow()
 
     private val _agingSettings = MutableStateFlow(AgingSettings())
-    val agingSettings: StateFlow<AgingSettings> = _agingSettings.asStateFlow()
+    override val agingSettings: StateFlow<AgingSettings> = _agingSettings.asStateFlow()
 
     private val _currentFilter = MutableStateFlow(PhotoFilter())
-    val currentFilter: StateFlow<PhotoFilter> = _currentFilter.asStateFlow()
+    override val currentFilter: StateFlow<PhotoFilter> = _currentFilter.asStateFlow()
 
-    val filteredPhotos: StateFlow<List<Photo>> = combine(
+    override val filteredPhotos: StateFlow<List<Photo>> = combine(
         _photos,
         _currentFilter,
         _categories,
         _folders
     ) { photoList, filter, categoriesList, foldersList ->
-        var result = photoList
-
-        if (filter.onlyFavorites) {
-            result = result.filter { it.isFavorite }
-        }
-
-        if (filter.onlyScreenshots) {
-            result = result.filter { it.isScreenshot }
-        }
-
-        if (!filter.folderId.isNullOrBlank()) {
-            result = result.filter { it.folderId == filter.folderId }
-        }
-
-        if (!filter.categoryId.isNullOrBlank()) {
-            result = result.filter { filter.categoryId in it.categoryIds }
-        }
-
-        if (filter.dateRange != null) {
-            result = result.filter { it.dateAdded in filter.dateRange }
-        }
-
-        if (filter.actionCardType != null && filter.actionCardType != ActionCardType.ALL && filter.matchingPhotoIds != null && filter.searchQuery.isBlank()) {
-            result = result.filter { it.id in filter.matchingPhotoIds }
-        }
-
-        if (filter.searchQuery.isNotBlank()) {
-            val query = filter.searchQuery.trim().lowercase()
-            val unaccentedQuery = VietnameseUtils.removeDiacritics(query)
-            val ftsIds = filter.matchingPhotoIds
-            val catMap = categoriesList.associate { it.id to it.name.lowercase() }
-            val folderMap = foldersList.associate { it.id to it.name.lowercase() }
-
-            result = result.filter { photo ->
-                if (ftsIds != null && photo.id in ftsIds) return@filter true
-
-                val title = photo.title.lowercase()
-                val desc = photo.description.lowercase()
-                val fileName = photo.fileName.lowercase()
-                val eventTitle = photo.suggestedEventTitle?.lowercase() ?: ""
-                val eventDesc = photo.suggestedEventDescription?.lowercase() ?: ""
-                val tags = photo.semanticTags.joinToString(" ").lowercase()
-                val ocrText = photo.piiScrubbedText?.lowercase() ?: ""
-                val categoryNames = photo.categoryIds.mapNotNull { catMap[it] }.joinToString(" ")
-                val folderName = folderMap[photo.folderId] ?: ""
-
-                // 1. Direct contains check
-                title.contains(query) ||
-                desc.contains(query) ||
-                fileName.contains(query) ||
-                eventTitle.contains(query) ||
-                eventDesc.contains(query) ||
-                tags.contains(query) ||
-                ocrText.contains(query) ||
-                categoryNames.contains(query) ||
-                folderName.contains(query) ||
-                // 2. Vietnamese unaccented matching (e.g. "nui" matches "núi", "coc" matches "cốc")
-                VietnameseUtils.removeDiacritics(title).contains(unaccentedQuery) ||
-                VietnameseUtils.removeDiacritics(desc).contains(unaccentedQuery) ||
-                VietnameseUtils.removeDiacritics(fileName).contains(unaccentedQuery) ||
-                VietnameseUtils.removeDiacritics(eventTitle).contains(unaccentedQuery) ||
-                VietnameseUtils.removeDiacritics(eventDesc).contains(unaccentedQuery) ||
-                VietnameseUtils.removeDiacritics(tags).contains(unaccentedQuery) ||
-                VietnameseUtils.removeDiacritics(ocrText).contains(unaccentedQuery) ||
-                VietnameseUtils.removeDiacritics(categoryNames).contains(unaccentedQuery) ||
-                VietnameseUtils.removeDiacritics(folderName).contains(unaccentedQuery)
-            }
-        }
-
-        when (filter.sortOption) {
-            SortOption.DATE_DESC -> {
-                if (filter.searchQuery.isNotBlank() && filter.matchingPhotoIds != null && filter.matchingPhotoIds.isNotEmpty()) {
-                    val idOrder = filter.matchingPhotoIds.toList()
-                    val orderMap = idOrder.withIndex().associate { it.value to it.index }
-                    result.sortedBy { orderMap[it.id] ?: Int.MAX_VALUE }
-                } else {
-                    result.sortedWith(chronologicalDescComparator)
-                }
-            }
-            SortOption.DATE_ASC -> result.sortedWith(chronologicalAscComparator)
-            SortOption.TITLE_ASC -> result.sortedWith(compareBy<Photo> { it.title.lowercase() }.then(chronologicalDescComparator))
-            SortOption.TITLE_DESC -> result.sortedWith(compareByDescending<Photo> { it.title.lowercase() }.then(chronologicalDescComparator))
-        }
+        PhotoFilterEngine.filterAndSort(
+            photoList = photoList,
+            filter = filter,
+            categoriesList = categoriesList,
+            foldersList = foldersList,
+            chronologicalDescComparator = chronologicalDescComparator,
+            chronologicalAscComparator = chronologicalAscComparator
+        )
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val initialLoadCompleted = CompletableDeferred<Unit>()
@@ -210,11 +135,11 @@ class PhotoRepository(
      * Suspends until the initial persistence load has completed so callers like
      * device media scanning never reconcile against an uninitialized empty state.
      */
-    suspend fun awaitInitialLoad() {
+    override suspend fun awaitInitialLoad() {
         initialLoadCompleted.await()
     }
 
-    suspend fun loadInitialData(nowMillis: Long = 0L) {
+    override suspend fun loadInitialData(nowMillis: Long) {
         try {
             val rawData = persistenceDriver.loadData()
             if (!rawData.isNullOrBlank()) {
@@ -327,34 +252,34 @@ class PhotoRepository(
     }
 
     // Filter controls
-    fun updateFilter(filter: PhotoFilter) {
+    override fun updateFilter(filter: PhotoFilter) {
         _currentFilter.value = filter
     }
 
-    fun setFolderFilter(folderId: String?) {
+    override fun setFolderFilter(folderId: String?) {
         _currentFilter.value = _currentFilter.value.copy(folderId = folderId)
     }
 
-    fun setCategoryFilter(categoryId: String?) {
+    override fun setCategoryFilter(categoryId: String?) {
         _currentFilter.value = _currentFilter.value.copy(categoryId = categoryId)
     }
 
-    fun toggleFavoriteFilter() {
+    override fun toggleFavoriteFilter() {
         _currentFilter.value = _currentFilter.value.copy(onlyFavorites = !_currentFilter.value.onlyFavorites)
     }
 
-    fun toggleScreenshotsFilter() {
+    override fun toggleScreenshotsFilter() {
         _currentFilter.value = _currentFilter.value.copy(onlyScreenshots = !_currentFilter.value.onlyScreenshots)
     }
 
-    fun setActionCardFilter(actionCardType: ActionCardType?, matchingPhotoIds: Set<String>?) {
+    override fun setActionCardFilter(actionCardType: ActionCardType?, matchingPhotoIds: Set<String>?) {
         _currentFilter.value = _currentFilter.value.copy(
             actionCardType = actionCardType,
             matchingPhotoIds = if (actionCardType == null || actionCardType == ActionCardType.ALL) null else matchingPhotoIds
         )
     }
 
-    fun setSearchQuery(query: String, matchingPhotoIds: Set<String>? = null, dateRange: LongRange? = null) {
+    override fun setSearchQuery(query: String, matchingPhotoIds: Set<String>?, dateRange: LongRange?) {
         _currentFilter.value = _currentFilter.value.copy(
             searchQuery = query,
             matchingPhotoIds = matchingPhotoIds,
@@ -362,16 +287,16 @@ class PhotoRepository(
         )
     }
 
-    fun setSortOption(sortOption: SortOption) {
+    override fun setSortOption(sortOption: SortOption) {
         _currentFilter.value = _currentFilter.value.copy(sortOption = sortOption)
     }
 
-    fun clearFilters() {
+    override fun clearFilters() {
         _currentFilter.value = PhotoFilter()
     }
 
     // Quota & Tier management (IDEA.md)
-    fun toggleUserTier(isPro: Boolean) {
+    override fun toggleUserTier(isPro: Boolean) {
         _accountTier.value = _accountTier.value.copy(isPro = isPro)
         persistData()
     }
@@ -382,7 +307,7 @@ class PhotoRepository(
      * Automatically resets aiScansUsedThisMonth to 0 when entering a new calendar month
      * or when 30 days have elapsed since last reset.
      */
-    fun checkMonthlyQuotaReset(nowMillis: Long): Boolean {
+    override fun checkMonthlyQuotaReset(nowMillis: Long): Boolean {
         if (nowMillis <= 0L) return false
         val tier = _accountTier.value
         if (tier.lastQuotaResetMillis <= 0L) {
@@ -421,7 +346,7 @@ class PhotoRepository(
         return Pair(year, m)
     }
 
-    fun canUseAiScan(nowMillis: Long = 0L): Boolean {
+    override fun canUseAiScan(nowMillis: Long): Boolean {
         if (nowMillis > 0L) {
             checkMonthlyQuotaReset(nowMillis)
         }
@@ -429,7 +354,7 @@ class PhotoRepository(
         return tier.isPro || tier.aiScansUsedThisMonth < tier.aiScansQuota
     }
 
-    fun incrementQuotaUsage(nowMillis: Long = 0L): Boolean {
+    override fun incrementQuotaUsage(nowMillis: Long): Boolean {
         if (nowMillis > 0L) {
             checkMonthlyQuotaReset(nowMillis)
         }
@@ -452,19 +377,19 @@ class PhotoRepository(
     }
 
     // Update AI & Screenshot intelligence metadata
-    fun updatePhotoAiMetadata(
+    override fun updatePhotoAiMetadata(
         photoId: String,
         isScreenshot: Boolean,
         piiScrubbedText: String?,
         detectedIntent: String?,
-        suggestedEventTitle: String? = null,
-        suggestedEventDateMillis: Long? = null,
-        targetCategoryId: String? = null,
-        isProcessed: Boolean = true,
-        suggestedEventDescription: String? = null,
-        semanticTags: List<String> = emptyList(),
-        isCloudEnriched: Boolean? = null,
-        forceUpdate: Boolean = false
+        suggestedEventTitle: String?,
+        suggestedEventDateMillis: Long?,
+        targetCategoryId: String?,
+        isProcessed: Boolean,
+        suggestedEventDescription: String?,
+        semanticTags: List<String>,
+        isCloudEnriched: Boolean?,
+        forceUpdate: Boolean
     ) {
         updatePhotoAiMetadataBatch(
             listOf(
@@ -486,7 +411,7 @@ class PhotoRepository(
         )
     }
 
-    fun updatePhotoAiMetadataBatch(updates: List<PhotoAiMetadataUpdate>) {
+    override fun updatePhotoAiMetadataBatch(updates: List<PhotoAiMetadataUpdate>) {
         if (updates.isEmpty()) return
         val updateMap = updates.associateBy { it.photoId }
         val defaultCatIds = setOf("cat_events", "cat_tobuy", "cat_reading", "cat_nature", "cat_personal")
@@ -558,12 +483,12 @@ class PhotoRepository(
         persistData()
     }
 
-    fun updatePhotoStoragePath(
+    override fun updatePhotoStoragePath(
         photoId: String,
         newFilePath: String,
-        newFileName: String? = null,
-        newFileSizeBytes: Long? = null,
-        newPhotoId: String? = null
+        newFileName: String?,
+        newFileSizeBytes: Long?,
+        newPhotoId: String?
     ) {
         _photos.value = _photos.value.map { photo ->
             if (photo.id == photoId) {
@@ -581,7 +506,7 @@ class PhotoRepository(
     }
 
 
-    fun markReminderCreated(photoId: String) {
+    override fun markReminderCreated(photoId: String) {
         _photos.value = _photos.value.map { photo ->
             if (photo.id == photoId) {
                 photo.copy(hasReminderCreated = true, isProcessed = true)
@@ -593,7 +518,7 @@ class PhotoRepository(
     }
 
 
-    fun markAsProcessed(photoId: String, isProcessed: Boolean) {
+    override fun markAsProcessed(photoId: String, isProcessed: Boolean) {
         _photos.value = _photos.value.map { photo ->
             if (photo.id == photoId) {
                 photo.copy(isProcessed = isProcessed)
@@ -607,7 +532,7 @@ class PhotoRepository(
 
     // Aging Housekeeping: find screenshots older than X days (default 30 days)
     // Pro Tier allows Custom Aging Rules per category (IDEA.md Part 3)
-    fun getAgingPhotos(daysOld: Int = _agingSettings.value.retentionDays, nowMillis: Long = 0L): List<Photo> {
+    override fun getAgingPhotos(daysOld: Int, nowMillis: Long): List<Photo> {
         if (daysOld <= 0 || nowMillis <= 0L) return emptyList()
         val customRules = _agingSettings.value.categoryRetentionDays
         val isPro = _accountTier.value.isPro
@@ -629,7 +554,7 @@ class PhotoRepository(
         }
     }
 
-    fun setCategoryRetentionRule(categoryId: String, retentionDays: Int) {
+    override fun setCategoryRetentionRule(categoryId: String, retentionDays: Int) {
         val updatedMap = _agingSettings.value.categoryRetentionDays.toMutableMap()
         if (retentionDays > 0) {
             updatedMap[categoryId] = retentionDays
@@ -641,7 +566,7 @@ class PhotoRepository(
     }
 
 
-    fun batchDeletePhotos(photoIds: List<String>): List<Photo> {
+    override fun batchDeletePhotos(photoIds: List<String>): List<Photo> {
         val idSet = photoIds.toSet()
         val deleted = _photos.value.filter { it.id in idSet }
         _photos.value = _photos.value.filterNot { it.id in idSet }
@@ -650,7 +575,7 @@ class PhotoRepository(
     }
 
     // Sync device scanned photos and folders
-    fun syncDevicePhotos(scannedPhotos: List<Photo>, scannedFolders: List<Folder>) {
+    override fun syncDevicePhotos(scannedPhotos: List<Photo>, scannedFolders: List<Folder>) {
         val existingPhotoMap = _photos.value.associateBy { it.filePath }
         val existingById = _photos.value.associateBy { it.id }
         val existingFolderMap = _folders.value.associateBy { it.name.lowercase() }
@@ -742,7 +667,7 @@ class PhotoRepository(
     }
 
 
-    fun toggleFavorite(photoId: String): Boolean {
+    override fun toggleFavorite(photoId: String): Boolean {
         var newFavoriteState = false
         _photos.value = _photos.value.map { photo ->
             if (photo.id == photoId) {
@@ -756,17 +681,17 @@ class PhotoRepository(
         return newFavoriteState
     }
 
-    fun addPhoto(
+    override fun addPhoto(
         fileName: String,
         filePath: String,
-        title: String = "",
-        description: String = "",
-        folderId: String? = null,
-        categoryIds: Set<String> = emptySet(),
-        isFavorite: Boolean = false,
-        isScreenshot: Boolean = false,
-        dateAdded: Long = 0L,
-        fileSizeBytes: Long = 0L
+        title: String,
+        description: String,
+        folderId: String?,
+        categoryIds: Set<String>,
+        isFavorite: Boolean,
+        isScreenshot: Boolean,
+        dateAdded: Long,
+        fileSizeBytes: Long
     ): Photo {
         val targetFolderId = folderId
             ?: _folders.value.firstOrNull { it.id == "folder_screenshots" || it.name.contains("màn hình", ignoreCase = true) }?.id
@@ -795,7 +720,7 @@ class PhotoRepository(
      * Batch inserts vaulted photos processed in the background into the repository memory cache.
      * Preserves all AI metadata extracted while the app was closed.
      */
-    fun addVaultedPhotos(newPhotos: List<Photo>) {
+    override fun addVaultedPhotos(newPhotos: List<Photo>) {
         if (newPhotos.isEmpty()) return
         val currentMap = _photos.value.associateBy { it.id }.toMutableMap()
         for (p in newPhotos) {
@@ -805,13 +730,13 @@ class PhotoRepository(
         persistData()
     }
 
-    fun updatePhoto(
+    override fun updatePhoto(
         photoId: String,
         title: String,
         description: String,
         folderId: String,
         categoryIds: Set<String>,
-        isFavorite: Boolean? = null
+        isFavorite: Boolean?
     ): Photo? {
         var updatedPhoto: Photo? = null
         _photos.value = _photos.value.map { photo ->
@@ -835,14 +760,14 @@ class PhotoRepository(
         return updatedPhoto
     }
 
-    fun deletePhoto(photoId: String): Photo? {
+    override fun deletePhoto(photoId: String): Photo? {
         val target = _photos.value.find { it.id == photoId } ?: return null
         _photos.value = _photos.value.filterNot { it.id == photoId }
         persistData()
         return target
     }
 
-    fun movePhotosToFolder(photoIds: List<String>, targetFolderId: String) {
+    override fun movePhotosToFolder(photoIds: List<String>, targetFolderId: String) {
         if (_folders.value.none { it.id == targetFolderId }) return
         _photos.value = _photos.value.map { photo ->
             if (photo.id in photoIds) {
@@ -855,7 +780,7 @@ class PhotoRepository(
     }
 
 
-    fun createFolder(name: String, colorHex: String = "#3B82F6", iconName: String = "folder", timestamp: Long = 0L): Folder {
+    override fun createFolder(name: String, colorHex: String, iconName: String, timestamp: Long): Folder {
         val trimmed = name.trim()
         val id = "folder_${timestamp}_${_folders.value.size + 1}"
         val folder = Folder(
@@ -871,7 +796,7 @@ class PhotoRepository(
         return folder
     }
 
-    fun renameFolder(folderId: String, newName: String, colorHex: String? = null, iconName: String? = null): Folder? {
+    override fun renameFolder(folderId: String, newName: String, colorHex: String?, iconName: String?): Folder? {
         val trimmed = newName.trim()
         if (trimmed.isBlank()) return null
         var updatedFolder: Folder? = null
@@ -894,7 +819,7 @@ class PhotoRepository(
         return updatedFolder
     }
 
-    fun deleteFolder(folderId: String): Boolean {
+    override fun deleteFolder(folderId: String): Boolean {
         val folder = _folders.value.find { it.id == folderId } ?: return false
         if (folder.isDefault) return false
 
@@ -921,7 +846,7 @@ class PhotoRepository(
         return true
     }
 
-    fun createCategory(name: String, colorHex: String = "#6366F1", iconName: String = "tag", timestamp: Long = 0L): Category? {
+    override fun createCategory(name: String, colorHex: String, iconName: String, timestamp: Long): Category? {
         if (!_accountTier.value.isPro) {
             return null
         }
@@ -940,7 +865,7 @@ class PhotoRepository(
         return category
     }
 
-    fun renameCategory(categoryId: String, newName: String, newColorHex: String, newIconName: String? = null): Category? {
+    override fun renameCategory(categoryId: String, newName: String, newColorHex: String, newIconName: String?): Category? {
         val trimmed = newName.trim()
         if (trimmed.isBlank()) return null
         var updatedCategory: Category? = null
@@ -963,7 +888,7 @@ class PhotoRepository(
         return updatedCategory
     }
 
-    fun deleteCategory(categoryId: String): Boolean {
+    override fun deleteCategory(categoryId: String): Boolean {
         if (_categories.value.none { it.id == categoryId }) return false
 
         _photos.value = _photos.value.map { photo ->
@@ -988,7 +913,7 @@ class PhotoRepository(
      * Retroactively assign a collection of photo IDs to a specific category.
      * Preserves existing category associations and avoids duplicates.
      */
-    fun assignPhotosToCategory(photoIds: Collection<String>, categoryId: String): Int {
+    override fun assignPhotosToCategory(photoIds: Collection<String>, categoryId: String): Int {
         if (_categories.value.none { it.id == categoryId } || photoIds.isEmpty()) return 0
         val targetIdSet = photoIds.toSet()
         var updatedCount = 0
@@ -1013,7 +938,7 @@ class PhotoRepository(
      * Replaces previous category associations with newCategoryId to prevent clutter,
      * while rigorously preserving calendar and shopping scheduling capabilities.
      */
-    fun reassignPhotosToCategory(photoIds: Collection<String>, newCategoryId: String): Int {
+    override fun reassignPhotosToCategory(photoIds: Collection<String>, newCategoryId: String): Int {
         if (_categories.value.none { it.id == newCategoryId } || photoIds.isEmpty()) return 0
         val targetIdSet = photoIds.toSet()
         var updatedCount = 0

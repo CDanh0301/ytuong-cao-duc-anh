@@ -8,6 +8,7 @@ import android.media.ExifInterface
 import android.net.Uri
 import com.example.test2.ai.cards.QualityFlags
 import com.example.test2.storage.LocalCryptoManager
+import com.example.test2.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -31,15 +32,15 @@ object ImageDecoder {
         try {
             decodeInternal(context, path, maxPixels)
         } catch (oom: OutOfMemoryError) {
-            android.util.Log.w("ImageDecoder", "OOM decoding $path with maxPixels=$maxPixels, retrying with half", oom)
+            AppLogger.w("ImageDecoder", "OOM decoding $path with maxPixels=$maxPixels, retrying with half", oom)
             try {
                 decodeInternal(context, path, maxPixels / 2)
             } catch (secondOom: OutOfMemoryError) {
-                android.util.Log.e("ImageDecoder", "Failed to decode $path after OOM retry", secondOom)
+                AppLogger.e("ImageDecoder", "Failed to decode $path after OOM retry", secondOom)
                 null
             }
         } catch (e: Exception) {
-            android.util.Log.e("ImageDecoder", "Error decoding image at $path: ${e.message}", e)
+            AppLogger.e("ImageDecoder", "Error decoding image at $path: ${e.message}", e)
             null
         }
     }
@@ -52,25 +53,26 @@ object ImageDecoder {
             } else {
                 QualityFlags.maxDecodePixels
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.w("ImageDecoder", "Failed to read memory class", e)
             QualityFlags.maxDecodePixels
         }
     }
 
     private fun decodeInternal(context: Context, path: String, maxPixels: Int): Decoded? {
-        android.util.Log.d("ImageDecoder", "decodeInternal starting for $path")
+        AppLogger.d("ImageDecoder", "decodeInternal starting for $path")
         val rotationDegrees = getRotationDegrees(context, path)
 
         // 1. Measure dimensions
         val bounds = measureBounds(context, path)
         if (bounds == null) {
-            android.util.Log.e("ImageDecoder", "measureBounds returned null for $path")
+            AppLogger.e("ImageDecoder", "measureBounds returned null for $path")
             return null
         }
         val origW = bounds.first
         val origH = bounds.second
         if (origW <= 0 || origH <= 0) {
-            android.util.Log.e("ImageDecoder", "measureBounds origW/origH invalid ($origW x $origH) for $path")
+            AppLogger.e("ImageDecoder", "measureBounds origW/origH invalid ($origW x $origH) for $path")
             return null
         }
 
@@ -91,7 +93,7 @@ object ImageDecoder {
             BitmapFactory.decodeStream(stream, null, options)
         }
         if (decodedBitmap == null) {
-            android.util.Log.e("ImageDecoder", "decodeStream returned null for $path with sampleSize=$sampleSize")
+            AppLogger.e("ImageDecoder", "decodeStream returned null for $path with sampleSize=$sampleSize")
             return null
         }
 
@@ -110,7 +112,7 @@ object ImageDecoder {
             decodedBitmap
         }
 
-        android.util.Log.d("ImageDecoder", "decodeInternal SUCCESS for $path: ${finalBitmap.width}x${finalBitmap.height}")
+        AppLogger.d("ImageDecoder", "decodeInternal SUCCESS for $path: ${finalBitmap.width}x${finalBitmap.height}")
         return Decoded(finalBitmap, rotationDegrees)
     }
 
@@ -124,12 +126,12 @@ object ImageDecoder {
                 BitmapFactory.decodeStream(it, null, options)
             }
         } catch (e: Exception) {
-            android.util.Log.e("ImageDecoder", "measureBounds exception for $path: ${e.message}")
+            AppLogger.e("ImageDecoder", "measureBounds exception for $path: ${e.message}", e)
             return null
         }
 
         if (options.outWidth <= 0 || options.outHeight <= 0) {
-            android.util.Log.e("ImageDecoder", "measureBounds invalid dimensions (${options.outWidth} x ${options.outHeight}) for $path")
+            AppLogger.e("ImageDecoder", "measureBounds invalid dimensions (${options.outWidth} x ${options.outHeight}) for $path")
             return null
         }
         return Pair(options.outWidth, options.outHeight)

@@ -1,6 +1,9 @@
 package com.example.test2.ai
 
 import android.content.Context
+import com.example.test2.data.local.dao.FtsSearchDao
+import com.example.test2.data.local.dao.ScreenshotQueueDao
+import com.example.test2.data.local.dao.VectorDao
 import com.example.test2.database.AppDatabaseHelper
 import com.example.test2.database.DefaultCategories
 import com.example.test2.shared.models.Category
@@ -285,7 +288,10 @@ object RetroactiveCategorizer {
         apiKey: String? = null,
         minNeuralSimilarity: Float = 0.50f,
         minVectorSimilarity: Float = 0.35f,
-        context: Context? = null
+        context: Context? = null,
+        vectorDao: VectorDao? = dbHelper,
+        ftsDao: FtsSearchDao? = dbHelper,
+        queueDao: ScreenshotQueueDao? = dbHelper
     ): List<String> {
         val catName = category.name.trim()
         if (catName.isBlank() || photos.isEmpty()) return emptyList()
@@ -298,11 +304,11 @@ object RetroactiveCategorizer {
 
         // 1. Level 1: 768D Cloud Neural Embedding (Google gemini-embedding-2 - Pro Tier)
         val neuralScores = mutableMapOf<String, Float>()
-        if (!apiKey.isNullOrBlank() && dbHelper != null) {
+        if (!apiKey.isNullOrBlank() && vectorDao != null) {
             try {
                 val catEmbedding = CloudAiBackendClient.getEmbedding(catName, apiKey)
                 if (catEmbedding != null) {
-                    val allNeuralVectors = dbHelper.getAllPhotoNeuralVectors()
+                    val allNeuralVectors = vectorDao.getAllPhotoNeuralVectors()
                         .filterKeys { it in unassignedIdSet }
                     if (allNeuralVectors.isNotEmpty()) {
                         val neuralResults = VectorSemanticSearchEngine.searchWithQueryVector(
@@ -322,9 +328,9 @@ object RetroactiveCategorizer {
 
         // 2. Level 2: On-device 128D Vector Embedding
         val vectorScores = mutableMapOf<String, Float>()
-        if (dbHelper != null) {
+        if (vectorDao != null) {
             try {
-                val onDeviceVectors = dbHelper.getAllPhotoVectors()
+                val onDeviceVectors = vectorDao.getAllPhotoVectors()
                     .filterKeys { it in unassignedIdSet }
                 if (onDeviceVectors.isNotEmpty()) {
                     val vectorResults = VectorSemanticSearchEngine.search(
@@ -343,9 +349,9 @@ object RetroactiveCategorizer {
         }
 
         // 3. Level 3: FTS5 Lexical Search Matches
-        val ftsMatches = if (dbHelper != null) {
+        val ftsMatches = if (ftsDao != null) {
             try {
-                dbHelper.searchPhotosFts(catName, minScore = 2.0).toSet()
+                ftsDao.searchPhotosFts(catName, minScore = 2.0).toSet()
             } catch (_: Exception) {
                 emptySet()
             }
@@ -382,7 +388,7 @@ object RetroactiveCategorizer {
             }
 
             // Check if previously AI-analyzed and recorded in SQLite queue
-            val cachedRecord = dbHelper?.getProcessedScreenshot(p.id)
+            val cachedRecord = queueDao?.getProcessedScreenshot(p.id)
             if (cachedRecord != null && cachedRecord.targetCategoryId == category.id) {
                 matchedIds.add(p.id)
                 continue

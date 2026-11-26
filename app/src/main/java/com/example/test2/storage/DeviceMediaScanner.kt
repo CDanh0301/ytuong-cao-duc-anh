@@ -7,6 +7,7 @@ import android.provider.MediaStore
 import com.example.test2.shared.models.Folder
 import com.example.test2.shared.models.Photo
 import com.example.test2.shared.repository.PhotoRepository
+import com.example.test2.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -127,7 +128,8 @@ class DeviceMediaScanner(private val context: Context) {
                     )
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.w("DeviceMediaScanner", "Failed to scan device images", e)
         }
 
         // Generate Folder models from discovered album buckets

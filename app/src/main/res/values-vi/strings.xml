@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">Thư viện ảnh</string>
+    <string name="search_bar_hint">Tìm ảnh, hóa đơn, địa chỉ...</string>
+    <string name="widget_search_description">Tìm kiếm tức thì ảnh chụp màn hình bằng từ khóa OCR, ngữ nghĩa AI và thẻ thông minh.</string>
+    <string name="widget_search_cd">Tìm ảnh</string>
+    <string name="widget_pro_badge">✨ AI</string>
+    <string name="widget_vault_locked_cd">Két bảo mật đang bật</string>
+    <string name="widget_chip_address">📍 Địa chỉ</string>
+    <string name="widget_chip_payment">💳 STK</string>
+    <string name="widget_chip_contact">👤 Liên hệ</string>
 </resources>

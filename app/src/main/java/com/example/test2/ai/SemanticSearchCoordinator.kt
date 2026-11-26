@@ -1,6 +1,8 @@
 package com.example.test2.ai
 
 import android.content.Context
+import com.example.test2.data.local.dao.FtsSearchDao
+import com.example.test2.data.local.dao.VectorDao
 import com.example.test2.database.AppDatabaseHelper
 import com.example.test2.services.CloudUpgradeWorker
 import com.example.test2.shared.repository.PhotoRepository
@@ -21,8 +23,14 @@ data class SearchCoordinatorResult(
 class SemanticSearchCoordinator(
     private val context: Context,
     private val repository: PhotoRepository,
-    private val dbHelper: AppDatabaseHelper
+    private val ftsDao: FtsSearchDao,
+    private val vectorDao: VectorDao
 ) {
+    constructor(
+        context: Context,
+        repository: PhotoRepository,
+        dbHelper: AppDatabaseHelper
+    ) : this(context, repository, dbHelper, dbHelper)
     // Phase 3: In-memory cache for query neural embeddings to prevent redundant network calls
     private val queryEmbeddingCache = ConcurrentHashMap<String, FloatArray>()
 
@@ -54,7 +62,7 @@ class SemanticSearchCoordinator(
 
         // 1. FTS5 BM25 Ranked keyword search
         val ftsRankedList = if (cleanQuery.isNotBlank()) {
-            dbHelper.searchPhotosFtsRanked(cleanQuery)
+            ftsDao.searchPhotosFtsRanked(cleanQuery)
         } else {
             emptyList()
         }
@@ -64,7 +72,7 @@ class SemanticSearchCoordinator(
 
         if (isPro) {
             val apiKey = CloudAiConfigManager.getApiKey(context)
-            val neuralVectors = dbHelper.getAllPhotoNeuralVectors()
+            val neuralVectors = vectorDao.getAllPhotoNeuralVectors()
 
             var vectorRankedList: List<Pair<String, Float>> = emptyList()
 
@@ -94,7 +102,7 @@ class SemanticSearchCoordinator(
 
             // Fallback to on-device 128D vector engine if cloud neural embedding wasn't available / offline
             if (vectorRankedList.isEmpty() && cleanQuery.isNotBlank()) {
-                val allVectors = dbHelper.getAllPhotoVectors()
+                val allVectors = vectorDao.getAllPhotoVectors()
                 val customCategories = repository.categories.value
                 vectorRankedList = VectorSemanticSearchEngine.search(
                     query = cleanQuery,
@@ -154,7 +162,7 @@ class SemanticSearchCoordinator(
         val currentClusterVersion = prefs.getInt("vector_cluster_version", 0)
         val mustReindex = forceReindex || currentClusterVersion < CURRENT_VECTOR_CLUSTER_VERSION
 
-        val allVectors = if (mustReindex) emptyMap() else dbHelper.getAllPhotoVectors()
+        val allVectors = if (mustReindex) emptyMap() else vectorDao.getAllPhotoVectors()
         val photos = repository.photos.value
         val customCategories = repository.categories.value
 
@@ -177,7 +185,7 @@ class SemanticSearchCoordinator(
                     categoryNames = catNames,
                     customCategories = customCategories
                 )
-                dbHelper.savePhotoVector(p.id, embedding, p.detectedIntent ?: "")
+                vectorDao.savePhotoVector(p.id, embedding, p.detectedIntent ?: "")
             }
         }
 
@@ -186,7 +194,7 @@ class SemanticSearchCoordinator(
         }
 
         // Phase 2: Backfill neural vectors on model version 1.0
-        val missingBackfill = dbHelper.getPhotosNeedingNeuralVectorBackfill(NEURAL_VECTOR_MODEL_VERSION)
+        val missingBackfill = vectorDao.getPhotosNeedingNeuralVectorBackfill(NEURAL_VECTOR_MODEL_VERSION)
         if (missingBackfill.isNotEmpty()) {
             CloudUpgradeWorker.enqueue(context)
         }

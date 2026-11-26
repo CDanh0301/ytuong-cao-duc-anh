@@ -1,16 +1,20 @@
 package com.example.test2.database
 
-import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.util.Log
 import com.example.test2.BuildConfig
-import com.example.test2.ai.VectorSemanticSearchEngine
+import com.example.test2.data.local.dao.ActionCardDao
+import com.example.test2.data.local.dao.ActionCardDaoImpl
+import com.example.test2.data.local.dao.FtsSearchDao
+import com.example.test2.data.local.dao.FtsSearchDaoImpl
+import com.example.test2.data.local.dao.ScreenshotQueueDao
+import com.example.test2.data.local.dao.ScreenshotQueueDaoImpl
+import com.example.test2.data.local.dao.VectorDao
+import com.example.test2.data.local.dao.VectorDaoImpl
 import com.example.test2.shared.models.ActionCard
 import com.example.test2.shared.models.ActionCardType
-import com.example.test2.shared.utils.VietnameseUtils
-import java.util.concurrent.ConcurrentHashMap
 
 data class ScreenshotQueueItem(
     val id: Long,
@@ -102,7 +106,8 @@ internal fun android.database.Cursor.toProcessedScreenshotRecord(): ProcessedScr
     )
 }
 
-class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
+class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION),
+    ScreenshotQueueDao, FtsSearchDao, VectorDao, ActionCardDao {
 
     companion object {
         const val DATABASE_NAME = "smart_photo_manager.db"
@@ -116,11 +121,11 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
         // 10: Enforced idempotent Action Cards table creation & schema migration
         const val DATABASE_VERSION = 10
 
-        private const val TABLE_QUEUE = "screenshot_queue"
-        private const val TABLE_FTS = "photo_fts"
-        private const val TABLE_VECTORS = "photo_vectors"
-        private const val TABLE_NEURAL_VECTORS = "photo_neural_vectors"
-        private const val TABLE_ACTION_CARDS = "photo_action_cards"
+        private const val TABLE_QUEUE = ScreenshotQueueDaoImpl.TABLE_QUEUE
+        private const val TABLE_FTS = FtsSearchDaoImpl.TABLE_FTS
+        private const val TABLE_VECTORS = VectorDaoImpl.TABLE_VECTORS
+        private const val TABLE_NEURAL_VECTORS = VectorDaoImpl.TABLE_NEURAL_VECTORS
+        private const val TABLE_ACTION_CARDS = ActionCardDaoImpl.TABLE_ACTION_CARDS
 
         @Volatile
         private var instance: AppDatabaseHelper? = null
@@ -132,14 +137,17 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
         }
     }
 
-    // Phase 3: In-memory vector caching to eliminate disk I/O and RAM reallocation on every keystroke
-    private val neuralVectorCache = ConcurrentHashMap<String, FloatArray>()
-    private val localVectorCache = ConcurrentHashMap<String, FloatArray>()
-
     private fun logDebugError(message: String, error: Throwable) {
         if (BuildConfig.DEBUG) {
             Log.e("AppDatabaseHelper", message, error)
         }
+    }
+
+    private val ftsDaoImpl by lazy { FtsSearchDaoImpl(this) }
+    private val vectorDaoImpl by lazy { VectorDaoImpl(this, ::logDebugError) }
+    private val actionCardDaoImpl by lazy { ActionCardDaoImpl(this, ::logDebugError) }
+    private val queueDaoImpl by lazy {
+        ScreenshotQueueDaoImpl(this, ftsDaoImpl, vectorDaoImpl, actionCardDaoImpl, ::logDebugError)
     }
 
     override fun onConfigure(db: SQLiteDatabase) {
@@ -152,12 +160,10 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
 
     override fun onOpen(db: SQLiteDatabase) {
         super.onOpen(db)
-        // Idempotent safeguard: ensures TABLE_ACTION_CARDS always exists regardless of migration history
         createActionCardsTable(db)
     }
 
     override fun onCreate(db: SQLiteDatabase) {
-        // 1. Screenshot Queue table (State machine: PENDING -> PROCESSING -> OCR_DONE -> CLOUD_DONE -> EMBEDDED -> COMPLETED)
         db.execSQL(
             """
             CREATE TABLE IF NOT EXISTS $TABLE_QUEUE (
@@ -187,11 +193,7 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
             );
             """.trimIndent()
         )
-
-        // 2. FTS5 Virtual Table with weighted columns (Phase 2 & 3)
         createFtsTable(db)
-
-        // 3. Photo Vectors table for Advanced Vector Semantic Search (128D on-device)
         db.execSQL(
             """
             CREATE TABLE IF NOT EXISTS $TABLE_VECTORS (
@@ -203,8 +205,6 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
             );
             """.trimIndent()
         )
-
-        // 4. Photo Neural Vectors table for Cloud Embedding API (768D) with model versioning (Phase 2)
         db.execSQL(
             """
             CREATE TABLE IF NOT EXISTS $TABLE_NEURAL_VECTORS (
@@ -217,8 +217,6 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
             );
             """.trimIndent()
         )
-
-        // 5. Smart Action Cards table (Phase: Smart Information Cards)
         createActionCardsTable(db)
     }
 
@@ -330,7 +328,6 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
             }
         }
         if (oldVersion < 6) {
-            // Phase 2 Schema additions: summary, tags, entities, items_to_buy, needs_cloud_upgrade, model_name, model_version
             try {
                 db.execSQL("ALTER TABLE $TABLE_QUEUE ADD COLUMN summary TEXT;")
                 db.execSQL("ALTER TABLE $TABLE_QUEUE ADD COLUMN tags TEXT;")
@@ -347,7 +344,6 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
                 db.execSQL("ALTER TABLE $TABLE_NEURAL_VECTORS ADD COLUMN model_version TEXT;")
             } catch (_: Exception) {
             }
-            // Re-create FTS table with separate weighted columns
             try {
                 db.execSQL("DROP TABLE IF EXISTS $TABLE_FTS;")
                 createFtsTable(db)
@@ -381,362 +377,75 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
         }
     }
 
-    // --- Queue Operations (Phase 1 & IDEA.md Step 1) ---
+    // --- Delegated DAO Operations ---
 
-    fun enqueueScreenshot(
+    override fun enqueueScreenshot(
         photoId: String,
         filePath: String,
         dateAdded: Long,
-        isLiveCapture: Boolean = false,
-        scrubbedText: String? = null,
-        photoTitle: String? = null,
-        originalFileName: String? = null
-    ): Boolean {
-        return try {
-            val db = writableDatabase
-            val now = System.currentTimeMillis()
-            val values = ContentValues().apply {
-                put("photo_id", photoId)
-                put("file_path", filePath)
-                put("date_added", dateAdded)
-                put("status", "PENDING")
-                put("is_live_capture", if (isLiveCapture) 1 else 0)
-                if (scrubbedText != null) put("scrubbed_text", scrubbedText)
-                if (photoTitle != null) put("photo_title", photoTitle)
-                if (originalFileName != null) put("original_file_name", originalFileName)
-                put("created_at", now)
-                put("updated_at", now)
-            }
-            val rowId = db.insertWithOnConflict(TABLE_QUEUE, null, values, SQLiteDatabase.CONFLICT_IGNORE)
-            if (rowId < 0) {
-                // If item is already enqueued, refresh file_path and metadata if not yet COMPLETED
-                val updateValues = ContentValues().apply {
-                    put("file_path", filePath)
-                    if (scrubbedText != null) put("scrubbed_text", scrubbedText)
-                    if (photoTitle != null) put("photo_title", photoTitle)
-                    if (originalFileName != null) put("original_file_name", originalFileName)
-                    put("updated_at", now)
-                }
-                db.update(TABLE_QUEUE, updateValues, "photo_id = ? AND status != 'COMPLETED'", arrayOf(photoId)) >= 0
-            } else {
-                true
-            }
-        } catch (_: Exception) {
-            false
-        }
-    }
+        isLiveCapture: Boolean,
+        scrubbedText: String?,
+        photoTitle: String?,
+        originalFileName: String?
+    ): Boolean = queueDaoImpl.enqueueScreenshot(photoId, filePath, dateAdded, isLiveCapture, scrubbedText, photoTitle, originalFileName)
 
-    /**
-     * Immediately synchronizes a photo's newly vaulted .enc file path into TABLE_QUEUE.
-     * If an older photo was not yet in TABLE_QUEUE, inserts a PENDING record with the .enc path
-     * so both background AI processing and vault recovery work seamlessly.
-     */
-    fun syncVaultedPathToQueue(
+    override fun syncVaultedPathToQueue(
         photoId: String,
         newFilePath: String,
-        dateAdded: Long = System.currentTimeMillis(),
-        photoTitle: String? = null,
-        originalFileName: String? = null
-    ): Boolean {
-        return try {
-            val db = writableDatabase
-            val now = System.currentTimeMillis()
-            val values = ContentValues().apply {
-                put("file_path", newFilePath)
-                put("updated_at", now)
-            }
-            val updatedRows = db.update(TABLE_QUEUE, values, "photo_id = ?", arrayOf(photoId))
-            if (updatedRows > 0) {
-                true
-            } else {
-                val insertValues = ContentValues().apply {
-                    put("photo_id", photoId)
-                    put("file_path", newFilePath)
-                    put("date_added", dateAdded)
-                    put("status", "PENDING")
-                    put("is_live_capture", 0)
-                    if (!photoTitle.isNullOrBlank()) put("photo_title", photoTitle)
-                    if (!originalFileName.isNullOrBlank()) put("original_file_name", originalFileName)
-                    put("created_at", now)
-                    put("updated_at", now)
-                }
-                db.insertWithOnConflict(TABLE_QUEUE, null, insertValues, SQLiteDatabase.CONFLICT_IGNORE) >= 0
-            }
-        } catch (_: Exception) {
-            false
-        }
-    }
+        dateAdded: Long,
+        photoTitle: String?,
+        originalFileName: String?
+    ): Boolean = queueDaoImpl.syncVaultedPathToQueue(photoId, newFilePath, dateAdded, photoTitle, originalFileName)
 
-    /**
-     * Atomically enqueues a batch of screenshots to TABLE_QUEUE in a single SQLite transaction.
-     * Uses CONFLICT_IGNORE to guarantee zero duplicate rows while finishing in < 5ms.
-     */
-    fun enqueueScreenshotsBatch(items: List<Triple<String, String, Long>>): Int {
-        if (items.isEmpty()) return 0
-        return try {
-            val db = writableDatabase
-            db.beginTransaction()
-            var count = 0
-            val now = System.currentTimeMillis()
-            try {
-                for (item in items) {
-                    val values = ContentValues().apply {
-                        put("photo_id", item.first)
-                        put("file_path", item.second)
-                        put("date_added", item.third)
-                        put("status", "PENDING")
-                        put("is_live_capture", 0)
-                        put("created_at", now)
-                        put("updated_at", now)
-                    }
-                    val rowId = db.insertWithOnConflict(TABLE_QUEUE, null, values, SQLiteDatabase.CONFLICT_IGNORE)
-                    if (rowId >= 0) count++
-                }
-                db.setTransactionSuccessful()
-            } finally {
-                db.endTransaction()
-            }
-            count
-        } catch (_: Exception) {
-            0
-        }
-    }
+    override fun enqueueScreenshotsBatch(items: List<Triple<String, String, Long>>): Int =
+        queueDaoImpl.enqueueScreenshotsBatch(items)
 
-    /**
-     * Atomically claims the next PENDING queue item by setting its status to 'PROCESSING'.
-     * Delegates to [claimNextPendingQueueItems] with limit = 1 to prevent code duplication.
-     */
-    fun claimNextPendingQueueItem(): ScreenshotQueueItem? {
-        return claimNextPendingQueueItems(limit = 1).firstOrNull()
-    }
+    override fun claimNextPendingQueueItem(): ScreenshotQueueItem? =
+        queueDaoImpl.claimNextPendingQueueItem()
 
-    /**
-     * Atomically claims a batch of up to [limit] PENDING queue items by setting its status to 'PROCESSING'.
-     * Guarantees zero duplicate processing while enabling 5-6x batching throughput.
-     */
-    fun claimNextPendingQueueItems(limit: Int = 6): List<ScreenshotQueueItem> {
-        val db = writableDatabase
-        db.beginTransaction()
-        try {
-            val claimedItems = mutableListOf<ScreenshotQueueItem>()
-            val safeLimit = limit.coerceIn(1, 20)
-            // Note: SQLite does not support ? parameter binding for the LIMIT clause, so coerced integer is interpolated safely.
-            db.rawQuery(
-                "SELECT id, photo_id, file_path, date_added, status, is_live_capture, scrubbed_text, photo_title, original_file_name FROM $TABLE_QUEUE WHERE status = 'PENDING' ORDER BY date_added ASC LIMIT $safeLimit",
-                null
-            ).use { cursor ->
-                val now = System.currentTimeMillis()
-                while (cursor.moveToNext()) {
-                    val id = cursor.getLong(0)
-                    val photoId = cursor.getString(1)
-                    val filePath = cursor.getString(2)
-                    val dateAdded = cursor.getLong(3)
-                    val isLiveCapture = if (cursor.columnCount > 5) cursor.getInt(5) == 1 else false
-                    val scrubbedText = if (cursor.columnCount > 6) cursor.getString(6) else null
-                    val photoTitle = if (cursor.columnCount > 7) cursor.getString(7) else null
-                    val originalFileName = if (cursor.columnCount > 8) cursor.getString(8) else null
+    override fun claimNextPendingQueueItems(limit: Int): List<ScreenshotQueueItem> =
+        queueDaoImpl.claimNextPendingQueueItems(limit)
 
-                    val values = ContentValues().apply {
-                        put("status", "PROCESSING")
-                        put("updated_at", now)
-                    }
-                    val updated = db.update(TABLE_QUEUE, values, "id = ? AND status = 'PENDING'", arrayOf(id.toString()))
-                    if (updated > 0) {
-                        claimedItems.add(
-                            ScreenshotQueueItem(
-                                id = id,
-                                photoId = photoId,
-                                filePath = filePath,
-                                dateAdded = dateAdded,
-                                status = "PROCESSING",
-                                isLiveCapture = isLiveCapture,
-                                scrubbedText = scrubbedText,
-                                photoTitle = photoTitle,
-                                originalFileName = originalFileName
-                            )
-                        )
-                    }
-                }
-            }
-            db.setTransactionSuccessful()
-            return claimedItems
-        } catch (e: Exception) {
-            logDebugError("Failed to claim next pending items", e)
-            return emptyList()
-        } finally {
-            db.endTransaction()
-        }
-    }
+    override fun updateQueueItemState(update: QueueStateUpdate) =
+        queueDaoImpl.updateQueueItemState(update)
 
-    /**
-     * Updates an item's state in the queue state machine using structured update object.
-     */
-    fun updateQueueItemState(update: QueueStateUpdate) {
-        try {
-            val db = writableDatabase
-            val values = ContentValues().apply {
-                put("status", update.status)
-                put("updated_at", System.currentTimeMillis())
-                if (update.scrubbedText != null) put("scrubbed_text", update.scrubbedText)
-                if (update.detectedIntent != null) put("detected_intent", update.detectedIntent)
-                if (update.eventTitle != null) put("event_title", update.eventTitle)
-                if (update.eventDateMillis != null) put("event_date_millis", update.eventDateMillis)
-                if (update.targetCategoryId != null) put("target_category_id", update.targetCategoryId)
-                if (update.eventDescription != null) put("event_description", update.eventDescription)
-                if (update.summary != null) put("summary", update.summary)
-                if (update.tags != null) put("tags", update.tags)
-                if (update.entities != null) put("entities", update.entities)
-                if (update.itemsToBuy != null) put("items_to_buy", update.itemsToBuy)
-                if (update.needsCloudUpgrade) put("needs_cloud_upgrade", 1) else put("needs_cloud_upgrade", 0)
-                if (update.modelName != null) put("model_name", update.modelName)
-                if (update.modelVersion != null) put("model_version", update.modelVersion)
-            }
-            db.update(TABLE_QUEUE, values, "photo_id = ?", arrayOf(update.photoId))
-        } catch (e: Exception) {
-            logDebugError("Failed to update queue item state for ${update.photoId}", e)
-        }
-    }
-
-    /**
-     * Overload for backward-compatibility with existing callers.
-     */
-    fun updateQueueItemState(
+    override fun updateQueueItemState(
         photoId: String,
         status: String,
-        scrubbedText: String? = null,
-        detectedIntent: String? = null,
-        eventTitle: String? = null,
-        eventDateMillis: Long? = null,
-        targetCategoryId: String? = null,
-        eventDescription: String? = null,
-        summary: String? = null,
-        tags: String? = null,
-        entities: String? = null,
-        itemsToBuy: String? = null,
-        needsCloudUpgrade: Boolean = false,
-        modelName: String? = null,
-        modelVersion: String? = null
-    ) {
-        updateQueueItemState(
-            QueueStateUpdate(
-                photoId = photoId,
-                status = status,
-                scrubbedText = scrubbedText,
-                detectedIntent = detectedIntent,
-                eventTitle = eventTitle,
-                eventDateMillis = eventDateMillis,
-                targetCategoryId = targetCategoryId,
-                eventDescription = eventDescription,
-                summary = summary,
-                tags = tags,
-                entities = entities,
-                itemsToBuy = itemsToBuy,
-                needsCloudUpgrade = needsCloudUpgrade,
-                modelName = modelName,
-                modelVersion = modelVersion
-            )
-        )
-    }
+        scrubbedText: String?,
+        detectedIntent: String?,
+        eventTitle: String?,
+        eventDateMillis: Long?,
+        targetCategoryId: String?,
+        eventDescription: String?,
+        summary: String?,
+        tags: String?,
+        entities: String?,
+        itemsToBuy: String?,
+        needsCloudUpgrade: Boolean,
+        modelName: String?,
+        modelVersion: String?
+    ) = queueDaoImpl.updateQueueItemState(
+        photoId, status, scrubbedText, detectedIntent, eventTitle, eventDateMillis,
+        targetCategoryId, eventDescription, summary, tags, entities, itemsToBuy,
+        needsCloudUpgrade, modelName, modelVersion
+    )
 
-    fun getPendingQueue(): List<ScreenshotQueueItem> {
-        val items = mutableListOf<ScreenshotQueueItem>()
-        try {
-            val db = readableDatabase
-            db.rawQuery(
-                "SELECT id, photo_id, file_path, date_added, status, is_live_capture FROM $TABLE_QUEUE WHERE status = 'PENDING' ORDER BY date_added DESC LIMIT 50",
-                null
-            ).use { cursor ->
-                val idCol = cursor.getColumnIndexOrThrow("id")
-                val photoIdCol = cursor.getColumnIndexOrThrow("photo_id")
-                val pathCol = cursor.getColumnIndexOrThrow("file_path")
-                val dateCol = cursor.getColumnIndexOrThrow("date_added")
-                val statusCol = cursor.getColumnIndexOrThrow("status")
-                val isLiveCol = cursor.getColumnIndex("is_live_capture")
+    override fun getPendingQueue(): List<ScreenshotQueueItem> = queueDaoImpl.getPendingQueue()
 
-                while (cursor.moveToNext()) {
-                    items.add(
-                        ScreenshotQueueItem(
-                            id = cursor.getLong(idCol),
-                            photoId = cursor.getString(photoIdCol),
-                            filePath = cursor.getString(pathCol),
-                            dateAdded = cursor.getLong(dateCol),
-                            status = cursor.getString(statusCol),
-                            isLiveCapture = if (isLiveCol >= 0) cursor.getInt(isLiveCol) == 1 else false
-                        )
-                    )
-                }
-            }
-        } catch (_: Exception) {
-        }
-        return items
-    }
+    override fun getQueueItemsNeedingCloudUpgrade(): List<ScreenshotQueueItem> =
+        queueDaoImpl.getQueueItemsNeedingCloudUpgrade()
 
-    /**
-     * Retrieves all items that were processed offline or with heuristics and need cloud AI upgrade.
-     */
-    fun getQueueItemsNeedingCloudUpgrade(): List<ScreenshotQueueItem> {
-        val items = mutableListOf<ScreenshotQueueItem>()
-        try {
-            val db = readableDatabase
-            db.rawQuery(
-                "SELECT id, photo_id, file_path, date_added, status, scrubbed_text, detected_intent, event_title, event_date_millis, target_category_id, event_description FROM $TABLE_QUEUE WHERE needs_cloud_upgrade = 1 LIMIT 20",
-                null
-            ).use { cursor ->
-                while (cursor.moveToNext()) {
-                    items.add(
-                        ScreenshotQueueItem(
-                            id = cursor.getLong(0),
-                            photoId = cursor.getString(1),
-                            filePath = cursor.getString(2),
-                            dateAdded = cursor.getLong(3),
-                            status = cursor.getString(4),
-                            scrubbedText = cursor.getString(5),
-                            detectedIntent = cursor.getString(6),
-                            eventTitle = cursor.getString(7),
-                            eventDateMillis = if (cursor.isNull(8)) null else cursor.getLong(8),
-                            targetCategoryId = cursor.getString(9),
-                            eventDescription = cursor.getString(10),
-                            needsCloudUpgrade = true
-                        )
-                    )
-                }
-            }
-        } catch (_: Exception) {
-        }
-        return items
-    }
+    override fun markQueueItemProcessed(photoId: String, status: String) =
+        queueDaoImpl.markQueueItemProcessed(photoId, status)
 
-    fun markQueueItemProcessed(photoId: String, status: String = "COMPLETED") {
-        try {
-            val db = writableDatabase
-            val values = ContentValues().apply {
-                put("status", status)
-                put("updated_at", System.currentTimeMillis())
-            }
-            db.update(TABLE_QUEUE, values, "photo_id = ?", arrayOf(photoId))
-        } catch (_: Exception) {
-        }
-    }
+    override fun markQueueItemProcessed(photoId: String, status: QueueStatus) =
+        queueDaoImpl.markQueueItemProcessed(photoId, status)
 
-    fun markQueueItemProcessed(photoId: String, status: QueueStatus) {
-        markQueueItemProcessed(photoId, status.name)
-    }
+    override fun isScreenshotProcessedOrNotified(photoId: String): Boolean =
+        queueDaoImpl.isScreenshotProcessedOrNotified(photoId)
 
-    fun isScreenshotProcessedOrNotified(photoId: String): Boolean {
-        return try {
-            val db = readableDatabase
-            db.rawQuery(
-                "SELECT id FROM $TABLE_QUEUE WHERE photo_id = ? AND status = 'COMPLETED'",
-                arrayOf(photoId)
-            ).use { cursor ->
-                cursor.moveToFirst()
-            }
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    fun recordProcessedScreenshot(
+    override fun recordProcessedScreenshot(
         photoId: String,
         filePath: String,
         dateAdded: Long,
@@ -745,104 +454,27 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
         eventTitle: String?,
         eventDateMillis: Long?,
         targetCategoryId: String?,
-        status: String = "COMPLETED",
-        eventDescription: String? = null,
-        summary: String? = null,
-        tags: String? = null,
-        entities: String? = null,
-        itemsToBuy: String? = null,
-        photoTitle: String? = null,
-        originalFileName: String? = null
-    ) {
-        try {
-            val db = writableDatabase
-            val now = System.currentTimeMillis()
-            var existingTitle: String? = null
-            var existingOrigName: String? = null
-            if (photoTitle == null || originalFileName == null) {
-                db.rawQuery(
-                    "SELECT photo_title, original_file_name FROM $TABLE_QUEUE WHERE photo_id = ?",
-                    arrayOf(photoId)
-                ).use { c ->
-                    if (c.moveToFirst()) {
-                        if (!c.isNull(0)) existingTitle = c.getString(0)
-                        if (!c.isNull(1)) existingOrigName = c.getString(1)
-                    }
-                }
-            }
-            val finalTitle = photoTitle ?: existingTitle
-            val finalOrigName = originalFileName ?: existingOrigName
-            val values = ContentValues().apply {
-                put("photo_id", photoId)
-                put("file_path", filePath)
-                put("date_added", dateAdded)
-                put("status", status)
-                put("scrubbed_text", scrubbedText)
-                put("detected_intent", detectedIntent)
-                put("event_title", eventTitle)
-                put("event_date_millis", eventDateMillis)
-                put("target_category_id", targetCategoryId)
-                put("event_description", eventDescription)
-                put("summary", summary)
-                put("tags", tags)
-                put("entities", entities)
-                put("items_to_buy", itemsToBuy)
-                if (!finalTitle.isNullOrBlank()) put("photo_title", finalTitle)
-                if (!finalOrigName.isNullOrBlank()) put("original_file_name", finalOrigName)
-                put("created_at", now)
-                put("updated_at", now)
-            }
-            db.insertWithOnConflict(TABLE_QUEUE, null, values, SQLiteDatabase.CONFLICT_REPLACE)
-        } catch (e: Exception) {
-            logDebugError("Failed to record processed screenshot $photoId", e)
-        }
-    }
+        status: String,
+        eventDescription: String?,
+        summary: String?,
+        tags: String?,
+        entities: String?,
+        itemsToBuy: String?,
+        photoTitle: String?,
+        originalFileName: String?
+    ) = queueDaoImpl.recordProcessedScreenshot(
+        photoId, filePath, dateAdded, scrubbedText, detectedIntent, eventTitle, eventDateMillis,
+        targetCategoryId, status, eventDescription, summary, tags, entities, itemsToBuy, photoTitle, originalFileName
+    )
 
-    fun getProcessedScreenshot(photoId: String): ProcessedScreenshotRecord? {
-        return try {
-            val db = readableDatabase
-            db.rawQuery(
-                "SELECT photo_id, file_path, scrubbed_text, detected_intent, event_title, event_date_millis, target_category_id, event_description, summary, tags, entities, items_to_buy, status, date_added, photo_title, original_file_name FROM $TABLE_QUEUE WHERE photo_id = ? AND status = 'COMPLETED'",
-                arrayOf(photoId)
-            ).use { cursor ->
-                if (cursor.moveToFirst()) cursor.toProcessedScreenshotRecord() else null
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
+    override fun getProcessedScreenshot(photoId: String): ProcessedScreenshotRecord? =
+        queueDaoImpl.getProcessedScreenshot(photoId)
 
-    fun resetHangingProcessingItems() {
-        try {
-            val db = writableDatabase
-            val values = ContentValues().apply {
-                put("status", "PENDING")
-                put("updated_at", System.currentTimeMillis())
-            }
-            db.update(TABLE_QUEUE, values, "status = 'PROCESSING'", null)
-        } catch (_: Exception) {
-        }
-    }
+    override fun resetHangingProcessingItems() = queueDaoImpl.resetHangingProcessingItems()
 
-    fun getPendingQueueCount(): Int {
-        return try {
-            val db = readableDatabase
-            db.rawQuery(
-                "SELECT COUNT(*) FROM $TABLE_QUEUE WHERE status IN ('PENDING', 'PROCESSING', 'OCR_DONE')",
-                null
-            ).use { cursor ->
-                if (cursor.moveToFirst()) cursor.getInt(0) else 0
-            }
-        } catch (_: Exception) {
-            0
-        }
-    }
+    override fun getPendingQueueCount(): Int = queueDaoImpl.getPendingQueueCount()
 
-    /**
-     * Migrates records from oldPhotoId to newPhotoId (e.g. when restoring from vault to MediaStore)
-     * and sets status to COMPLETED with the new filePath to prevent re-processing.
-     */
-    fun migratePhotoRecords(
+    override fun migratePhotoRecords(
         oldPhotoId: String,
         newPhotoId: String,
         newFilePath: String,
@@ -852,656 +484,81 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
         eventTitle: String?,
         eventDateMillis: Long?,
         targetCategoryId: String?,
-        eventDescription: String? = null,
-        photoTitle: String? = null,
-        originalFileName: String? = null
-    ) {
-        try {
-            val db = writableDatabase
-            val now = System.currentTimeMillis()
+        eventDescription: String?,
+        photoTitle: String?,
+        originalFileName: String?
+    ) = queueDaoImpl.migratePhotoRecords(
+        oldPhotoId, newPhotoId, newFilePath, dateAdded, scrubbedText, detectedIntent,
+        eventTitle, eventDateMillis, targetCategoryId, eventDescription, photoTitle, originalFileName
+    )
 
-            val oldRecord = getProcessedScreenshot(oldPhotoId)
-            var fallbackTitle: String? = null
-            var fallbackOrigName: String? = null
-            var oldStatus: String? = oldRecord?.status
-            if (oldRecord == null) {
-                db.rawQuery(
-                    "SELECT photo_title, original_file_name, status FROM $TABLE_QUEUE WHERE photo_id = ?",
-                    arrayOf(oldPhotoId)
-                ).use { c ->
-                    if (c.moveToFirst()) {
-                        if (!c.isNull(0)) fallbackTitle = c.getString(0)
-                        if (!c.isNull(1)) fallbackOrigName = c.getString(1)
-                        if (!c.isNull(2)) oldStatus = c.getString(2)
-                    }
-                }
-            }
+    override fun getProcessedScreenshotsByIds(photoIds: List<String>): List<ProcessedScreenshotRecord> =
+        queueDaoImpl.getProcessedScreenshotsByIds(photoIds)
 
-            val finalScrubbedText = scrubbedText ?: oldRecord?.scrubbedText
-            val finalIntent = detectedIntent ?: oldRecord?.detectedIntent
-            val finalEventTitle = eventTitle ?: oldRecord?.eventTitle
-            val finalEventDate = eventDateMillis ?: oldRecord?.eventDateMillis
-            val finalCategoryId = targetCategoryId ?: oldRecord?.targetCategoryId
-            val finalDescription = eventDescription ?: oldRecord?.eventDescription
-            val finalSummary = oldRecord?.summary
-            val finalTags = oldRecord?.tags
-            val finalEntities = oldRecord?.entities
-            val finalItems = oldRecord?.itemsToBuy
-            val finalPhotoTitle = photoTitle ?: oldRecord?.photoTitle ?: fallbackTitle
-            val finalOrigName = originalFileName ?: oldRecord?.originalFileName ?: fallbackOrigName
-            val finalStatus = oldStatus ?: "COMPLETED"
+    override fun getAllCompletedProcessedScreenshots(): List<ProcessedScreenshotRecord> =
+        queueDaoImpl.getAllCompletedProcessedScreenshots()
 
-            val values = ContentValues().apply {
-                put("photo_id", newPhotoId)
-                put("file_path", newFilePath)
-                put("date_added", dateAdded)
-                put("status", finalStatus)
-                put("scrubbed_text", finalScrubbedText)
-                put("detected_intent", finalIntent)
-                put("event_title", finalEventTitle)
-                put("event_date_millis", finalEventDate)
-                put("target_category_id", finalCategoryId)
-                put("event_description", finalDescription)
-                put("summary", finalSummary)
-                put("tags", finalTags)
-                put("entities", finalEntities)
-                put("items_to_buy", finalItems)
-                if (!finalPhotoTitle.isNullOrBlank()) put("photo_title", finalPhotoTitle)
-                if (!finalOrigName.isNullOrBlank()) put("original_file_name", finalOrigName)
-                put("created_at", now)
-                put("updated_at", now)
-            }
-            db.insertWithOnConflict(TABLE_QUEUE, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+    override fun getAllCompletedOrVaultedScreenshots(): List<ProcessedScreenshotRecord> =
+        queueDaoImpl.getAllCompletedOrVaultedScreenshots()
 
-            if (oldPhotoId != newPhotoId) {
-                try {
-                    db.execSQL("UPDATE $TABLE_ACTION_CARDS SET photo_id = ? WHERE photo_id = ?", arrayOf(newPhotoId, oldPhotoId))
-                } catch (_: Exception) {}
-
-                db.delete(TABLE_QUEUE, "photo_id = ?", arrayOf(oldPhotoId))
-
-                try {
-                    db.execSQL("UPDATE $TABLE_FTS SET photo_id = ? WHERE photo_id = ?", arrayOf(newPhotoId, oldPhotoId))
-                } catch (_: Exception) {}
-
-                try {
-                    db.execSQL("UPDATE $TABLE_VECTORS SET photo_id = ? WHERE photo_id = ?", arrayOf(newPhotoId, oldPhotoId))
-                    localVectorCache.remove(oldPhotoId)?.let { localVectorCache[newPhotoId] = it }
-                } catch (_: Exception) {}
-
-                try {
-                    db.execSQL("UPDATE $TABLE_NEURAL_VECTORS SET photo_id = ? WHERE photo_id = ?", arrayOf(newPhotoId, oldPhotoId))
-                } catch (_: Exception) {}
-            }
-        } catch (e: Exception) {
-            logDebugError("Failed to migrate photo records from $oldPhotoId to $newPhotoId", e)
-        }
-    }
-
-    fun getProcessedScreenshotsByIds(photoIds: List<String>): List<ProcessedScreenshotRecord> {
-        if (photoIds.isEmpty()) return emptyList()
-        return try {
-            val db = readableDatabase
-            val placeholders = photoIds.joinToString(",") { "?" }
-            db.rawQuery(
-                "SELECT photo_id, file_path, scrubbed_text, detected_intent, event_title, event_date_millis, target_category_id, event_description, summary, tags, entities, items_to_buy, status, date_added, photo_title, original_file_name FROM $TABLE_QUEUE WHERE photo_id IN ($placeholders) AND status = 'COMPLETED'",
-                photoIds.toTypedArray()
-            ).use { cursor ->
-                buildList {
-                    while (cursor.moveToNext()) {
-                        add(cursor.toProcessedScreenshotRecord())
-                    }
-                }
-            }
-        } catch (_: Exception) {
-            emptyList()
-        }
-    }
-
-    fun getAllCompletedProcessedScreenshots(): List<ProcessedScreenshotRecord> {
-        return try {
-            val db = readableDatabase
-            db.rawQuery(
-                "SELECT photo_id, file_path, scrubbed_text, detected_intent, event_title, event_date_millis, target_category_id, event_description, summary, tags, entities, items_to_buy, status, date_added, photo_title, original_file_name FROM $TABLE_QUEUE WHERE status = 'COMPLETED'",
-                null
-            ).use { cursor ->
-                buildList {
-                    while (cursor.moveToNext()) {
-                        add(cursor.toProcessedScreenshotRecord())
-                    }
-                }
-            }
-        } catch (_: Exception) {
-            emptyList()
-        }
-    }
-
-    fun getAllCompletedOrVaultedScreenshots(): List<ProcessedScreenshotRecord> {
-        return try {
-            val db = readableDatabase
-            db.rawQuery(
-                "SELECT photo_id, file_path, scrubbed_text, detected_intent, event_title, event_date_millis, target_category_id, event_description, summary, tags, entities, items_to_buy, status, date_added, photo_title, original_file_name FROM $TABLE_QUEUE WHERE status = 'COMPLETED' OR file_path LIKE '%.enc'",
-                null
-            ).use { cursor ->
-                buildList {
-                    while (cursor.moveToNext()) {
-                        add(cursor.toProcessedScreenshotRecord())
-                    }
-                }
-            }
-        } catch (_: Exception) {
-            emptyList()
-        }
-    }
-
-    // --- FTS5 Full-Text Search Operations (Phase 2 & 3: BM25 Weighted Multi-Column) ---
-
-    fun indexPhotoFts(
+    override fun indexPhotoFts(
         photoId: String,
         title: String,
         scrubbedText: String,
-        intent: String = "",
-        categoryNames: String = "",
-        semanticTags: String = "",
-        entities: String = "",
-        summary: String = ""
-    ) {
-        try {
-            val db = writableDatabase
-            db.delete(TABLE_FTS, "photo_id = ?", arrayOf(photoId))
+        intent: String,
+        categoryNames: String,
+        semanticTags: String,
+        entities: String,
+        summary: String
+    ) = ftsDaoImpl.indexPhotoFts(photoId, title, scrubbedText, intent, categoryNames, semanticTags, entities, summary)
 
-            val normTitle = "$title ${VietnameseUtils.removeDiacritics(title)}"
-            val normTags = "$semanticTags ${VietnameseUtils.removeDiacritics(semanticTags)}"
-            val normEntities = "$entities ${VietnameseUtils.removeDiacritics(entities)}"
-            val normSummary = "$summary ${VietnameseUtils.removeDiacritics(summary)}"
-            val normText = "$scrubbedText ${VietnameseUtils.removeDiacritics(scrubbedText)}"
-            val normCat = "$categoryNames ${VietnameseUtils.removeDiacritics(categoryNames)}"
+    override fun removePhotoFts(photoId: String) = ftsDaoImpl.removePhotoFts(photoId)
 
-            val values = ContentValues().apply {
-                put("photo_id", photoId)
-                put("title", normTitle)
-                put("tags", normTags)
-                put("entities", normEntities)
-                put("summary", normSummary)
-                put("scrubbed_text", normText)
-                put("intent", intent)
-                put("category_names", normCat)
-            }
-            db.insert(TABLE_FTS, null, values)
-        } catch (_: Exception) {
-        }
-    }
+    override fun searchPhotosFtsRanked(query: String): List<Pair<String, Double>> =
+        ftsDaoImpl.searchPhotosFtsRanked(query)
 
-    fun removePhotoFts(photoId: String) {
-        try {
-            val db = writableDatabase
-            db.delete(TABLE_FTS, "photo_id = ?", arrayOf(photoId))
-        } catch (_: Exception) {
-        }
-    }
+    override fun searchPhotosFts(query: String, minScore: Double): List<String> =
+        ftsDaoImpl.searchPhotosFts(query, minScore)
 
-    /**
-     * Executes FTS5 search with terms combined using AND (falling back to OR)
-     * and ranked by BM25 with column weights:
-     * tags (10.0), entities (8.0), title (5.0), summary (3.0), category (2.0), body (1.0).
-     * Returns List of Pair(photoId, relevanceScore).
-     */
-    fun searchPhotosFtsRanked(query: String): List<Pair<String, Double>> {
-        val trimmed = query.trim()
-        if (trimmed.isEmpty()) return emptyList()
+    override fun savePhotoVector(photoId: String, vector: FloatArray, intent: String): Boolean =
+        vectorDaoImpl.savePhotoVector(photoId, vector, intent)
 
-        val tokens = trimmed
-            .replace(Regex("[^a-zA-Z0-9àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ\\s]"), " ")
-            .split(Regex("\\s+"))
-            .filter { it.isNotBlank() && it.length >= 2 }
+    override fun getAllPhotoVectors(): Map<String, FloatArray> = vectorDaoImpl.getAllPhotoVectors()
 
-        if (tokens.isEmpty()) return emptyList()
+    override fun deletePhotoVector(photoId: String) = vectorDaoImpl.deletePhotoVector(photoId)
 
-        val termClauses = tokens.map { token ->
-            val unacc = VietnameseUtils.removeDiacritics(token)
-            val sanitized = token.replace("\"", "\"\"")
-            val sanitizedUnacc = unacc.replace("\"", "\"\"")
-            val usePrefix = sanitized.length >= 4
-            val pattern1 = if (usePrefix) "\"$sanitized\"*" else "\"$sanitized\""
-            val pattern2 = if (usePrefix) "\"$sanitizedUnacc\"*" else "\"$sanitizedUnacc\""
-            if (sanitized != sanitizedUnacc) {
-                "($pattern1 OR $pattern2)"
-            } else {
-                pattern1
-            }
-        }
+    override fun savePhotoNeuralVector(photoId: String, vector: FloatArray, modelName: String, modelVersion: String): Boolean =
+        vectorDaoImpl.savePhotoNeuralVector(photoId, vector, modelName, modelVersion)
 
-        val andQuery = termClauses.joinToString(" AND ")
-        val orQuery = termClauses.joinToString(" OR ")
+    override fun savePhotoNeuralVectorsBatch(vectors: Map<String, FloatArray>, modelName: String, modelVersion: String): Boolean =
+        vectorDaoImpl.savePhotoNeuralVectorsBatch(vectors, modelName, modelVersion)
 
-        val results = mutableListOf<Pair<String, Double>>()
-        try {
-            val db = readableDatabase
-            // 1. Try AND query first
-            results.addAll(executeFtsMatch(db, andQuery))
+    override fun getAllPhotoNeuralVectors(): Map<String, FloatArray> = vectorDaoImpl.getAllPhotoNeuralVectors()
 
-            // 2. Fall back to OR query if AND returns 0 matches
-            if (results.isEmpty() && tokens.size > 1) {
-                results.addAll(executeFtsMatch(db, orQuery))
-            }
-        } catch (_: Exception) {
-        }
+    override fun deletePhotoNeuralVector(photoId: String) = vectorDaoImpl.deletePhotoNeuralVector(photoId)
 
-        // 3. Fallback to LIKE if FTS produced 0 results
-        if (results.isEmpty()) {
-            results.addAll(fallbackLikeSearch(query))
-        }
+    override fun getPhotosNeedingNeuralVectorBackfill(targetModelVersion: String): List<String> =
+        vectorDaoImpl.getPhotosNeedingNeuralVectorBackfill(targetModelVersion)
 
-        return results
-    }
+    override fun replaceActionCardsForPhoto(photoId: String, cards: List<ActionCard>) =
+        actionCardDaoImpl.replaceActionCardsForPhoto(photoId, cards)
 
-    private fun executeFtsMatch(db: SQLiteDatabase, matchQuery: String): List<Pair<String, Double>> {
-        val matches = mutableListOf<Pair<String, Double>>()
-        // FTS5 BM25 column weights: title=5.0, tags=10.0, entities=8.0, summary=3.0, scrubbed_text=1.0, intent=1.0, category_names=2.0
-        val sql = "SELECT photo_id, bm25(photo_fts, 5.0, 10.0, 8.0, 3.0, 1.0, 1.0, 2.0) AS score FROM $TABLE_FTS WHERE $TABLE_FTS MATCH ? ORDER BY score ASC LIMIT 200"
-        try {
-            db.rawQuery(sql, arrayOf(matchQuery)).use { cursor ->
-                val idCol = cursor.getColumnIndexOrThrow("photo_id")
-                val scoreCol = cursor.getColumnIndexOrThrow("score")
-                while (cursor.moveToNext()) {
-                    val id = cursor.getString(idCol)
-                    val rawBm25 = cursor.getDouble(scoreCol)
-                    // FTS5 bm25 returns negative values where more negative = higher relevance
-                    val positiveScore = -rawBm25
-                    matches.add(id to positiveScore)
-                }
-            }
-        } catch (_: Exception) {
-            // Legacy FTS4 fallback without bm25() function
-            try {
-                db.rawQuery("SELECT photo_id FROM $TABLE_FTS WHERE $TABLE_FTS MATCH ? LIMIT 100", arrayOf(matchQuery)).use { cursor ->
-                    val idCol = cursor.getColumnIndexOrThrow("photo_id")
-                    var rank = 100.0
-                    while (cursor.moveToNext()) {
-                        matches.add(cursor.getString(idCol) to rank)
-                        rank -= 0.5
-                    }
-                }
-            } catch (_: Exception) {
-            }
-        }
-        return matches
-    }
+    override fun saveActionCards(cards: List<ActionCard>) = actionCardDaoImpl.saveActionCards(cards)
 
-    private fun fallbackLikeSearch(query: String): List<Pair<String, Double>> {
-        val matches = mutableListOf<Pair<String, Double>>()
-        val clean = query.trim()
-        val unacc = VietnameseUtils.removeDiacritics(clean)
-        try {
-            val db = readableDatabase
-            val pattern1 = "%$clean%"
-            val pattern2 = "%$unacc%"
-            val sql = "SELECT photo_id FROM $TABLE_FTS WHERE title LIKE ? OR tags LIKE ? OR entities LIKE ? OR summary LIKE ? OR scrubbed_text LIKE ? OR category_names LIKE ? OR title LIKE ? OR tags LIKE ? LIMIT 100"
-            db.rawQuery(sql, arrayOf(pattern1, pattern1, pattern1, pattern1, pattern1, pattern1, pattern2, pattern2)).use { cursor ->
-                val idCol = cursor.getColumnIndexOrThrow("photo_id")
-                var rank = 50.0
-                while (cursor.moveToNext()) {
-                    matches.add(cursor.getString(idCol) to rank)
-                    rank -= 0.5
-                }
-            }
-        } catch (_: Exception) {
-        }
-        return matches
-    }
+    override fun getActionCardsForPhoto(photoId: String): List<ActionCard> =
+        actionCardDaoImpl.getActionCardsForPhoto(photoId)
 
-    fun searchPhotosFts(query: String, minScore: Double = 0.0): List<String> {
-        val ranked = searchPhotosFtsRanked(query)
-        val filtered = if (minScore > 0.0) {
-            ranked.filter { it.second >= minScore }
-        } else {
-            ranked
-        }
-        return filtered.map { it.first }
-    }
+    override fun getPhotoIdsByActionCardType(type: ActionCardType): Set<String> =
+        actionCardDaoImpl.getPhotoIdsByActionCardType(type)
 
-    // --- Vector Semantic Search Operations (Phase 3: In-Memory Caching) ---
+    override fun getActionCardsPhotoCountByType(): Map<ActionCardType, Int> =
+        actionCardDaoImpl.getActionCardsPhotoCountByType()
 
-    fun savePhotoVector(photoId: String, vector: FloatArray, intent: String = ""): Boolean {
-        localVectorCache[photoId] = vector
-        return try {
-            val db = writableDatabase
-            val blob = VectorSemanticSearchEngine.vectorToBlob(vector)
-            val values = ContentValues().apply {
-                put("photo_id", photoId)
-                put("vector", blob)
-                put("intent", intent)
-                put("dimension", vector.size)
-                put("updated_at", System.currentTimeMillis())
-            }
-            db.insertWithOnConflict(TABLE_VECTORS, null, values, SQLiteDatabase.CONFLICT_REPLACE) >= 0
-        } catch (e: Exception) {
-            logDebugError("Failed to save photo vector for $photoId", e)
-            false
-        }
-    }
+    override fun deleteActionCardsForPhoto(photoId: String): Boolean =
+        actionCardDaoImpl.deleteActionCardsForPhoto(photoId)
 
-    fun getAllPhotoVectors(): Map<String, FloatArray> {
-        if (localVectorCache.isNotEmpty()) {
-            return localVectorCache
-        }
-        val result = mutableMapOf<String, FloatArray>()
-        try {
-            val db = readableDatabase
-            db.rawQuery("SELECT photo_id, vector FROM $TABLE_VECTORS", null).use { cursor ->
-                val idCol = cursor.getColumnIndexOrThrow("photo_id")
-                val vecCol = cursor.getColumnIndexOrThrow("vector")
-                while (cursor.moveToNext()) {
-                    val id = cursor.getString(idCol)
-                    val blob = cursor.getBlob(vecCol)
-                    if (blob != null && blob.isNotEmpty()) {
-                        val vec = VectorSemanticSearchEngine.blobToVector(blob)
-                        result[id] = vec
-                        localVectorCache[id] = vec
-                    }
-                }
-            }
-        } catch (_: Exception) {
-        }
-        return result
-    }
+    override fun cleanOrphanedActionCards(validPhotoIds: Set<String>?) =
+        actionCardDaoImpl.cleanOrphanedActionCards(validPhotoIds)
 
-    fun deletePhotoVector(photoId: String) {
-        localVectorCache.remove(photoId)
-        try {
-            val db = writableDatabase
-            db.delete(TABLE_VECTORS, "photo_id = ?", arrayOf(photoId))
-        } catch (_: Exception) {
-        }
-    }
-
-    // --- Cloud Embedding API Neural Vectors Operations (gemini-embedding-2 - 768D) ---
-
-    fun savePhotoNeuralVector(
-        photoId: String,
-        vector: FloatArray,
-        modelName: String = "gemini-embedding-2",
-        modelVersion: String = "1.0"
-    ): Boolean {
-        neuralVectorCache[photoId] = vector
-        return try {
-            val db = writableDatabase
-            val blob = VectorSemanticSearchEngine.vectorToBlob(vector)
-            val values = ContentValues().apply {
-                put("photo_id", photoId)
-                put("vector", blob)
-                put("dimension", vector.size)
-                put("model_name", modelName)
-                put("model_version", modelVersion)
-                put("updated_at", System.currentTimeMillis())
-            }
-            db.insertWithOnConflict(TABLE_NEURAL_VECTORS, null, values, SQLiteDatabase.CONFLICT_REPLACE) >= 0
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    /**
-     * Atomically saves a batch of neural vectors in a single database transaction.
-     */
-    fun savePhotoNeuralVectorsBatch(
-        vectors: Map<String, FloatArray>,
-        modelName: String = "gemini-embedding-2",
-        modelVersion: String = "1.0"
-    ): Boolean {
-        if (vectors.isEmpty()) return true
-        vectors.forEach { (id, vec) -> neuralVectorCache[id] = vec }
-        val db = writableDatabase
-        db.beginTransaction()
-        try {
-            val now = System.currentTimeMillis()
-            for ((photoId, vector) in vectors) {
-                val blob = VectorSemanticSearchEngine.vectorToBlob(vector)
-                val values = ContentValues().apply {
-                    put("photo_id", photoId)
-                    put("vector", blob)
-                    put("dimension", vector.size)
-                    put("model_name", modelName)
-                    put("model_version", modelVersion)
-                    put("updated_at", now)
-                }
-                db.insertWithOnConflict(TABLE_NEURAL_VECTORS, null, values, SQLiteDatabase.CONFLICT_REPLACE)
-            }
-            db.setTransactionSuccessful()
-            return true
-        } catch (e: Exception) {
-            logDebugError("Failed to save photo neural vectors batch", e)
-            return false
-        } finally {
-            db.endTransaction()
-        }
-    }
-
-    fun getAllPhotoNeuralVectors(): Map<String, FloatArray> {
-        if (neuralVectorCache.isNotEmpty()) {
-            return neuralVectorCache
-        }
-        val result = mutableMapOf<String, FloatArray>()
-        try {
-            val db = readableDatabase
-            db.rawQuery("SELECT photo_id, vector FROM $TABLE_NEURAL_VECTORS", null).use { cursor ->
-                val idCol = cursor.getColumnIndexOrThrow("photo_id")
-                val vecCol = cursor.getColumnIndexOrThrow("vector")
-                while (cursor.moveToNext()) {
-                    val id = cursor.getString(idCol)
-                    val blob = cursor.getBlob(vecCol)
-                    if (blob != null && blob.isNotEmpty()) {
-                        val vec = VectorSemanticSearchEngine.blobToVector(blob)
-                        result[id] = vec
-                        neuralVectorCache[id] = vec
-                    }
-                }
-            }
-        } catch (_: Exception) {
-        }
-        return result
-    }
-
-    fun deletePhotoNeuralVector(photoId: String) {
-        neuralVectorCache.remove(photoId)
-        try {
-            val db = writableDatabase
-            db.delete(TABLE_NEURAL_VECTORS, "photo_id = ?", arrayOf(photoId))
-        } catch (_: Exception) {
-        }
-    }
-
-    /**
-     * Backfill helper (Phase 2): finds photo IDs that have no neural vector or are on an older model version.
-     */
-    fun getPhotosNeedingNeuralVectorBackfill(targetModelVersion: String = "1.0"): List<String> {
-        val missingIds = mutableListOf<String>()
-        try {
-            val db = readableDatabase
-            val sql = """
-                SELECT q.photo_id FROM $TABLE_QUEUE q
-                LEFT JOIN $TABLE_NEURAL_VECTORS n ON q.photo_id = n.photo_id
-                WHERE n.photo_id IS NULL OR n.model_version IS NULL OR n.model_version != ?
-            """.trimIndent()
-            db.rawQuery(sql, arrayOf(targetModelVersion)).use { cursor ->
-                while (cursor.moveToNext()) {
-                    missingIds.add(cursor.getString(0))
-                }
-            }
-        } catch (_: Exception) {
-        }
-        return missingIds
-    }
-
-    // --- Smart Action Cards Operations (Phase: Smart Information Cards) ---
-
-    fun replaceActionCardsForPhoto(photoId: String, cards: List<ActionCard>) {
-        try {
-            val db = writableDatabase
-            db.beginTransaction()
-            try {
-                db.delete(TABLE_ACTION_CARDS, "photo_id = ?", arrayOf(photoId))
-                val baseTime = System.currentTimeMillis()
-                for ((index, card) in cards.withIndex()) {
-                    val createdAt = if (card.createdAt > 0L) card.createdAt else baseTime + index
-                    val values = ContentValues().apply {
-                        put("id", card.id)
-                        put("photo_id", photoId)
-                        put("type", card.type.name)
-                        put("title", card.title)
-                        put("subtitle", card.subtitle)
-                        put("payload_json", card.payloadJson)
-                        put("created_at", createdAt)
-                    }
-                    db.insertWithOnConflict(TABLE_ACTION_CARDS, null, values, SQLiteDatabase.CONFLICT_REPLACE)
-                }
-                db.setTransactionSuccessful()
-            } finally {
-                db.endTransaction()
-            }
-        } catch (e: Exception) {
-            logDebugError("Failed to replace action cards for photo $photoId", e)
-        }
-    }
-
-    fun saveActionCards(cards: List<ActionCard>) {
-        if (cards.isEmpty()) return
-        try {
-            val db = writableDatabase
-            db.beginTransaction()
-            try {
-                for (card in cards) {
-                    val values = ContentValues().apply {
-                        put("id", card.id)
-                        put("photo_id", card.photoId)
-                        put("type", card.type.name)
-                        put("title", card.title)
-                        put("subtitle", card.subtitle)
-                        put("payload_json", card.payloadJson)
-                        put("created_at", if (card.createdAt > 0L) card.createdAt else System.currentTimeMillis())
-                    }
-                    db.insertWithOnConflict(TABLE_ACTION_CARDS, null, values, SQLiteDatabase.CONFLICT_REPLACE)
-                }
-                db.setTransactionSuccessful()
-            } finally {
-                db.endTransaction()
-            }
-        } catch (e: Exception) {
-            logDebugError("Failed to save action cards", e)
-        }
-    }
-
-    fun getActionCardsForPhoto(photoId: String): List<ActionCard> {
-        val result = mutableListOf<ActionCard>()
-        try {
-            val db = readableDatabase
-            db.rawQuery(
-                "SELECT id, photo_id, type, title, subtitle, payload_json, created_at FROM $TABLE_ACTION_CARDS WHERE photo_id = ? ORDER BY created_at ASC",
-                arrayOf(photoId)
-            ).use { cursor ->
-                while (cursor.moveToNext()) {
-                    val id = cursor.getString(0)
-                    val pId = cursor.getString(1)
-                    val typeStr = cursor.getString(2)
-                    val title = cursor.getString(3)
-                    val subtitle = cursor.getString(4)
-                    val payloadJson = cursor.getString(5)
-                    val createdAt = cursor.getLong(6)
-                    val type = try {
-                        ActionCardType.valueOf(typeStr)
-                    } catch (_: Exception) {
-                        ActionCardType.ALL
-                    }
-                    result.add(
-                        ActionCard(
-                            id = id,
-                            photoId = pId,
-                            type = type,
-                            title = title,
-                            subtitle = subtitle,
-                            payloadJson = payloadJson,
-                            createdAt = createdAt
-                        )
-                    )
-                }
-            }
-        } catch (_: Exception) {
-        }
-        return result
-    }
-
-    fun getPhotoIdsByActionCardType(type: ActionCardType): Set<String> {
-        val ids = mutableSetOf<String>()
-        try {
-            val db = readableDatabase
-            val cursor = if (type == ActionCardType.ALL) {
-                db.rawQuery("SELECT DISTINCT photo_id FROM $TABLE_ACTION_CARDS", null)
-            } else {
-                db.rawQuery("SELECT DISTINCT photo_id FROM $TABLE_ACTION_CARDS WHERE type = ?", arrayOf(type.name))
-            }
-            cursor.use {
-                while (it.moveToNext()) {
-                    ids.add(it.getString(0))
-                }
-            }
-        } catch (_: Exception) {
-        }
-        return ids
-    }
-
-    fun getActionCardsPhotoCountByType(): Map<ActionCardType, Int> {
-        val counts = mutableMapOf<ActionCardType, Int>()
-        try {
-            val db = readableDatabase
-            db.rawQuery(
-                "SELECT type, COUNT(DISTINCT photo_id) FROM $TABLE_ACTION_CARDS GROUP BY type",
-                null
-            ).use { cursor ->
-                while (cursor.moveToNext()) {
-                    val typeStr = cursor.getString(0)
-                    val count = cursor.getInt(1)
-                    try {
-                        val type = ActionCardType.valueOf(typeStr)
-                        counts[type] = count
-                    } catch (_: Exception) {
-                    }
-                }
-            }
-        } catch (_: Exception) {
-        }
-        return counts
-    }
-
-    fun deleteActionCardsForPhoto(photoId: String): Boolean {
-        return try {
-            val db = writableDatabase
-            db.delete(TABLE_ACTION_CARDS, "photo_id = ?", arrayOf(photoId)) > 0
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    fun cleanOrphanedActionCards(validPhotoIds: Set<String>? = null) {
-        try {
-            val db = writableDatabase
-            // Always purge any EVENT cards to enforce calendar deprecation
-            db.delete(TABLE_ACTION_CARDS, "type = ?", arrayOf("EVENT"))
-        } catch (_: Exception) {
-        }
-    }
-
-    /**
-     * Completely purges all database records associated with a photoId across all 5 tables:
-     * TABLE_QUEUE, TABLE_FTS, TABLE_VECTORS (128D), TABLE_NEURAL_VECTORS (768D), and TABLE_ACTION_CARDS.
-     */
-    fun purgePhotoData(photoId: String) {
-        try {
-            val db = writableDatabase
-            db.delete(TABLE_QUEUE, "photo_id = ?", arrayOf(photoId))
-        } catch (_: Exception) {}
-        removePhotoFts(photoId)
-        deletePhotoVector(photoId)
-        deletePhotoNeuralVector(photoId)
-        deleteActionCardsForPhoto(photoId)
-    }
+    override fun purgePhotoData(photoId: String) = queueDaoImpl.purgePhotoData(photoId)
 }

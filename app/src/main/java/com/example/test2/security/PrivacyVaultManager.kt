@@ -12,6 +12,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.provider.Settings
 import android.util.Log
+import com.example.test2.data.local.prefs.VaultPrefsDataSource
 import com.example.test2.storage.LocalCryptoManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -56,60 +57,35 @@ object PrivacyVaultManager {
         }
     }
 
-    private const val PREF_NAME = "privacy_vault_prefs"
-    private const val KEY_VAULT_ENABLED = "is_vault_enabled"
-    private const val KEY_HAS_PROMPTED_CONSENT = "has_prompted_consent"
-    private const val KEY_VAULT_SCOPE = "vault_scope"
-    private const val KEY_VAULT_ENABLED_SINCE = "vault_enabled_since"
-    private const val KEY_PENDING_VAULT_SCOPE = "pending_vault_scope"
-    private const val KEY_RESTORED_EXEMPT_IDS = "restored_exempt_ids"
-
     private val exemptLock = Any()
 
-    const val SCOPE_ALL = "ALL"
-    const val SCOPE_NEW_ONLY = "NEW_ONLY"
+    const val SCOPE_ALL = VaultPrefsDataSource.SCOPE_ALL
+    const val SCOPE_NEW_ONLY = VaultPrefsDataSource.SCOPE_NEW_ONLY
 
-    private fun getPrefs(context: Context) =
-        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+    private fun prefsSource(context: Context): VaultPrefsDataSource = VaultPrefsDataSource(context)
 
-    fun isVaultEnabled(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_VAULT_ENABLED, false)
-    }
+    fun isVaultEnabled(context: Context): Boolean = prefsSource(context).isVaultEnabled()
 
     fun setVaultEnabled(context: Context, enabled: Boolean) {
-        getPrefs(context).edit().putBoolean(KEY_VAULT_ENABLED, enabled).commit()
+        prefsSource(context).setVaultEnabled(enabled)
     }
 
-    fun getVaultScope(context: Context): String {
-        return getPrefs(context).getString(KEY_VAULT_SCOPE, SCOPE_ALL) ?: SCOPE_ALL
-    }
+    fun getVaultScope(context: Context): String = prefsSource(context).getVaultScope()
 
     fun setVaultScope(context: Context, scope: String) {
-        getPrefs(context).edit().putString(KEY_VAULT_SCOPE, scope).commit()
+        prefsSource(context).setVaultScope(scope)
     }
 
-    fun getPendingVaultScope(context: Context): String? {
-        return getPrefs(context).getString(KEY_PENDING_VAULT_SCOPE, null)
-    }
+    fun getPendingVaultScope(context: Context): String? = prefsSource(context).getPendingVaultScope()
 
     fun setPendingVaultScope(context: Context, scope: String?) {
-        val editor = getPrefs(context).edit()
-        if (scope == null) {
-            editor.remove(KEY_PENDING_VAULT_SCOPE)
-        } else {
-            editor.putString(KEY_PENDING_VAULT_SCOPE, scope)
-        }
-        // Use synchronous commit() so pending state survives immediate OS process kill
-        // when MANAGE_EXTERNAL_STORAGE is toggled in System Settings.
-        editor.commit()
+        prefsSource(context).setPendingVaultScope(scope)
     }
 
-    fun getVaultEnabledSince(context: Context): Long {
-        return getPrefs(context).getLong(KEY_VAULT_ENABLED_SINCE, 0L)
-    }
+    fun getVaultEnabledSince(context: Context): Long = prefsSource(context).getVaultEnabledSince()
 
     fun setVaultEnabledSince(context: Context, timestamp: Long) {
-        getPrefs(context).edit().putLong(KEY_VAULT_ENABLED_SINCE, timestamp).apply()
+        prefsSource(context).setVaultEnabledSince(timestamp)
     }
 
     fun shouldVaultScreenshot(context: Context, dateAddedMillis: Long): Boolean {
@@ -131,10 +107,10 @@ object PrivacyVaultManager {
         if (photoIdOrMediaId.isBlank()) return
         val key = normalizeExemptKey(photoIdOrMediaId)
         synchronized(exemptLock) {
-            val prefs = getPrefs(context)
-            val current = prefs.getStringSet(KEY_RESTORED_EXEMPT_IDS, null)?.toMutableSet() ?: mutableSetOf()
+            val source = prefsSource(context)
+            val current = source.getRestoredExemptIds().toMutableSet()
             if (current.add(key)) {
-                prefs.edit().putStringSet(KEY_RESTORED_EXEMPT_IDS, HashSet(current)).commit()
+                source.saveRestoredExemptIds(current)
             }
         }
     }
@@ -143,10 +119,10 @@ object PrivacyVaultManager {
         if (photoIdOrMediaId.isBlank()) return
         val key = normalizeExemptKey(photoIdOrMediaId)
         synchronized(exemptLock) {
-            val prefs = getPrefs(context)
-            val current = prefs.getStringSet(KEY_RESTORED_EXEMPT_IDS, null)?.toMutableSet() ?: return
+            val source = prefsSource(context)
+            val current = source.getRestoredExemptIds().toMutableSet()
             if (current.remove(key)) {
-                prefs.edit().putStringSet(KEY_RESTORED_EXEMPT_IDS, HashSet(current)).commit()
+                source.saveRestoredExemptIds(current)
             }
         }
     }
@@ -155,14 +131,14 @@ object PrivacyVaultManager {
         if (photoIdOrMediaId.isBlank()) return false
         val key = normalizeExemptKey(photoIdOrMediaId)
         synchronized(exemptLock) {
-            val current = getPrefs(context).getStringSet(KEY_RESTORED_EXEMPT_IDS, null) ?: return false
+            val current = prefsSource(context).getRestoredExemptIds()
             return current.contains(key) || current.contains(photoIdOrMediaId)
         }
     }
 
     fun clearAllRestoredExempts(context: Context) {
         synchronized(exemptLock) {
-            getPrefs(context).edit().remove(KEY_RESTORED_EXEMPT_IDS).commit()
+            prefsSource(context).clearRestoredExemptIds()
         }
     }
 
@@ -215,12 +191,10 @@ object PrivacyVaultManager {
         return "$finalBase.$resolvedExt"
     }
 
-    fun hasPromptedConsent(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_HAS_PROMPTED_CONSENT, false)
-    }
+    fun hasPromptedConsent(context: Context): Boolean = prefsSource(context).hasPromptedConsent()
 
     fun setPromptedConsent(context: Context, prompted: Boolean) {
-        getPrefs(context).edit().putBoolean(KEY_HAS_PROMPTED_CONSENT, prompted).apply()
+        prefsSource(context).setPromptedConsent(prompted)
     }
 
     /**

@@ -3,6 +3,7 @@ package com.example.test2.storage
 import android.content.Context
 import android.net.Uri
 import com.example.test2.shared.repository.PersistenceDriver
+import com.example.test2.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -25,14 +26,16 @@ class AndroidFilePersistenceDriver(private val context: Context) : PersistenceDr
                 val cipherBytes = encryptedDataFile.readBytes()
                 val plainBytes = LocalCryptoManager.decrypt(cipherBytes)
                 return@withContext String(plainBytes, Charsets.UTF_8)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                AppLogger.w("AndroidPersistence", "Failed to decrypt metadata file", e)
             }
         }
         // 2. Fallback to legacy unencrypted file
         if (legacyDataFile.exists()) {
             try {
                 return@withContext legacyDataFile.readText()
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                AppLogger.w("AndroidPersistence", "Failed to read legacy metadata file", e)
             }
         }
         null
@@ -50,7 +53,8 @@ class AndroidFilePersistenceDriver(private val context: Context) : PersistenceDr
                 if (legacyDataFile.exists()) {
                     legacyDataFile.delete()
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                AppLogger.e("AndroidPersistence", "Failed to save encrypted metadata", e)
             }
         }
     }
@@ -86,7 +90,8 @@ class AndroidPhotoStorage(private val context: Context) {
                 filePath = targetFile.absolutePath,
                 fileSizeBytes = targetFile.length()
             )
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.e("AndroidPhotoStorage", "Failed to save encrypted image from URI", e)
             null
         }
     }
@@ -103,7 +108,8 @@ class AndroidPhotoStorage(private val context: Context) {
             } else {
                 true
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.w("AndroidPhotoStorage", "Failed to delete physical file: $filePath", e)
             false
         }
     }

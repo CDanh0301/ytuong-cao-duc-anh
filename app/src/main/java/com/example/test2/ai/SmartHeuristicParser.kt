@@ -58,6 +58,32 @@ object SmartHeuristicParser {
         }
     }
 
+    fun createCalendarIntentForPhoto(photo: Photo, nowMillis: Long = System.currentTimeMillis()): Intent {
+        val isShopping = photo.detectedIntent == "SHOPPING" || photo.categoryIds.contains(DefaultCategories.TO_BUY)
+        val time = photo.suggestedEventDateMillis ?: if (isShopping) {
+            nowMillis + 24 * 3600_000L
+        } else {
+            nowMillis + 3600_000L
+        }
+        val calTitle = if (isShopping) {
+            val rawTitle = photo.suggestedEventTitle ?: photo.title
+            if (rawTitle.startsWith("Mua sắm:", ignoreCase = true)) rawTitle else "Mua sắm: $rawTitle"
+        } else {
+            photo.suggestedEventTitle ?: photo.title
+        }
+        val calDescription = photo.suggestedEventDescription
+            ?: generateStructuredDescription(
+                text = photo.piiScrubbedText ?: photo.description,
+                intent = photo.detectedIntent ?: "OTHER",
+                title = calTitle
+            )
+        return createCalendarIntent(
+            title = calTitle,
+            startTimeMillis = time,
+            description = calDescription
+        )
+    }
+
     val DEFAULT_CATEGORY_IDS = com.example.test2.database.DefaultCategories.ALL_IDS
 
     val DEFAULT_CATEGORIES = listOf(

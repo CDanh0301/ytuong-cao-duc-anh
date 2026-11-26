@@ -11,9 +11,8 @@ import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.example.test2.ai.BatchPhotoItem
-import com.example.test2.ai.CloudAiBackendClient
-import com.example.test2.ai.CloudAiSyncNotifier
 import com.example.test2.ai.CloudAiConfigManager
+import com.example.test2.ai.CloudAiSyncNotifier
 import com.example.test2.ai.LocalActionCardExtractor
 import com.example.test2.ai.LocalImageLabeler
 import com.example.test2.ai.MlKitOcrEngine
@@ -25,15 +24,18 @@ import com.example.test2.ai.PrivacyPolicy
 import com.example.test2.ai.SmartHeuristicParser
 import com.example.test2.ai.VectorSemanticSearchEngine
 import com.example.test2.ai.cards.QualityFlags
-import com.example.test2.database.AppDatabaseHelper
+import com.example.test2.data.local.dao.ActionCardDao
+import com.example.test2.data.local.dao.FtsSearchDao
+import com.example.test2.data.local.dao.ScreenshotQueueDao
+import com.example.test2.data.local.dao.VectorDao
+import com.example.test2.database.QueueStatus
+import com.example.test2.di.AppModule
 import com.example.test2.notifications.ScreenshotNotificationHelper
-import com.example.test2.security.PrivacyVaultManager
 import com.example.test2.shared.models.ActionCard
-import com.example.test2.shared.models.Category
-import com.example.test2.storage.AndroidFilePersistenceDriver
+import com.example.test2.util.AppLogger
+import com.example.test2.widget.PhotoSearchWidgetUpdater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 
 private data class EmbeddingTarget(
     val photoId: String,
@@ -85,16 +87,20 @@ class ScreenshotQueueWorker(
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        val dbHelper = AppDatabaseHelper.getInstance(context)
-        dbHelper.resetHangingProcessingItems()
+        val dbHelper = AppModule.provideAppDatabaseHelper(context)
+        val queueDao: ScreenshotQueueDao = AppModule.provideScreenshotQueueDao(dbHelper)
+        val ftsDao: FtsSearchDao = AppModule.provideFtsDao(dbHelper)
+        val vectorDao: VectorDao = AppModule.provideVectorDao(dbHelper)
+        val actionCardDao: ActionCardDao = AppModule.provideActionCardDao(dbHelper)
+        queueDao.resetHangingProcessingItems()
 
         var processedCount = 0
         val maxItemsPerRun = 20
 
         while (!isStopped) {
-            val batch = dbHelper.claimNextPendingQueueItems(limit = 4)
+            val batch = queueDao.claimNextPendingQueueItems(limit = 4)
             if (batch.isEmpty()) break
-            processQueueBatch(batch, dbHelper)
+            processQueueBatch(batch, queueDao, ftsDao, vectorDao, actionCardDao)
             processedCount += batch.size
 
             if (QualityFlags.WORKER_HARDENING && processedCount >= maxItemsPerRun) {
@@ -109,42 +115,22 @@ class ScreenshotQueueWorker(
 
     private suspend fun processQueueBatch(
         batch: List<com.example.test2.database.ScreenshotQueueItem>,
-        dbHelper: AppDatabaseHelper
+        queueDao: ScreenshotQueueDao,
+        ftsDao: FtsSearchDao,
+        vectorDao: VectorDao,
+        actionCardDao: ActionCardDao
     ) {
         if (batch.isEmpty()) return
 
         try {
-            // Step 1: Load User Categories & Account Tier from persistent storage once per batch
-            val persistenceDriver = AndroidFilePersistenceDriver(context)
-            val rawJson = persistenceDriver.loadData()
-            val (userCategories, isProTier) = if (!rawJson.isNullOrBlank()) {
-                try {
-                    val root = JSONObject(rawJson)
-                    val catsArray = root.optJSONArray("categories")
-                    val catList = mutableListOf<Category>()
-                    if (catsArray != null) {
-                        for (i in 0 until catsArray.length()) {
-                            val obj = catsArray.optJSONObject(i) ?: continue
-                            val id = obj.optString("id", "")
-                            val name = obj.optString("name", "")
-                            val colorHex = obj.optString("colorHex", "#6366F1")
-                            val iconName = obj.optString("iconName", "tag")
-                            val createdAt = obj.optLong("createdAt", 0L)
-                            if (id.isNotBlank() && name.isNotBlank()) {
-                                catList.add(Category(id = id, name = name, colorHex = colorHex, iconName = iconName, createdAt = createdAt))
-                            }
-                        }
-                    }
-                    val isPro = root.optJSONObject("accountTier")?.optBoolean("isPro", true) ?: true
-                    Pair(catList, isPro)
-                } catch (_: Exception) {
-                    Pair(emptyList<Category>(), true)
-                }
-            } else {
-                Pair(emptyList<Category>(), true)
-            }
+            // Step 1: Load User Categories & Account Tier via IAppDataSource once per batch
+            val appDataSource = AppModule.provideAppDataSource(context)
+            val userCategories = appDataSource.getUserCategories()
+            val isProTier = appDataSource.isProTier()
 
-            val aiConfig = CloudAiConfigManager.getConfig(context)
+            val aiConfig = AppModule.provideCloudAiPrefs(context).getConfig()
+            val vaultManager = AppModule.provideVaultManager(context)
+            val geminiApiService = AppModule.provideGeminiApiService(context)
             val isOnline = isNetworkAvailable(context)
             val canUseCloud = isOnline && aiConfig.isEnabled && aiConfig.apiKey.isNotBlank()
 
@@ -169,13 +155,13 @@ class ScreenshotQueueWorker(
                 var currentFileName = item.originalFileName ?: item.filePath.substringAfterLast("/")
 
                 // If Privacy Vault mode is active and screenshot is eligible for auto-vault, seamlessly move and encrypt
-                if (PrivacyVaultManager.shouldAutoVaultPhoto(context, item.photoId, item.dateAdded) && !currentFilePath.endsWith(".enc")) {
+                if (vaultManager.shouldAutoVaultPhoto(item.photoId, item.dateAdded) && !currentFilePath.endsWith(".enc")) {
                     val uri = if (currentFilePath.startsWith("content://")) Uri.parse(currentFilePath) else null
-                    val vaultResult = PrivacyVaultManager.vaultAndEvictScreenshot(context, uri, currentFilePath, currentFileName)
+                    val vaultResult = vaultManager.vaultAndEvictScreenshot(uri, currentFilePath, currentFileName)
                     if (vaultResult != null) {
                         currentFilePath = vaultResult.newFilePath
                         currentFileName = vaultResult.newFileName
-                        dbHelper.syncVaultedPathToQueue(
+                        queueDao.syncVaultedPathToQueue(
                             photoId = item.photoId,
                             newFilePath = currentFilePath,
                             dateAdded = item.dateAdded,
@@ -189,7 +175,7 @@ class ScreenshotQueueWorker(
                 val title = item.photoTitle ?: fileName.substringBeforeLast(".")
 
                 if (SmartHeuristicParser.isJunkOrMeme(fileName)) {
-                    dbHelper.recordProcessedScreenshot(
+                    queueDao.recordProcessedScreenshot(
                         photoId = item.photoId,
                         filePath = currentFilePath,
                         dateAdded = item.dateAdded,
@@ -198,9 +184,9 @@ class ScreenshotQueueWorker(
                         eventTitle = null,
                         eventDateMillis = null,
                         targetCategoryId = null,
-                        status = "COMPLETED"
+                        status = QueueStatus.COMPLETED.name
                     )
-                    dbHelper.markQueueItemProcessed(item.photoId, "COMPLETED")
+                    queueDao.markQueueItemProcessed(item.photoId, QueueStatus.COMPLETED)
                     preprocessed.add(
                         PreprocessedItem(item, currentFilePath, fileName, title, com.example.test2.ai.VisualAnalysisResult(), "", isJunk = true, needsCloudAnalysis = false)
                     )
@@ -224,15 +210,15 @@ class ScreenshotQueueWorker(
                     photoTitle = title
                 )
                 if (actionCards.isNotEmpty()) {
-                    dbHelper.replaceActionCardsForPhoto(item.photoId, actionCards)
+                    actionCardDao.replaceActionCardsForPhoto(item.photoId, actionCards)
                 }
 
                 val piiResult = onDeviceResult?.let { PiiScrubResult(it.scrubbedText, false) } ?: PiiScrubber.scrub(rawOcrText)
                 val scrubbedText = piiResult.scrubbedText
 
-                dbHelper.updateQueueItemState(
+                queueDao.updateQueueItemState(
                     photoId = item.photoId,
-                    status = "OCR_DONE",
+                    status = QueueStatus.OCR_DONE.name,
                     scrubbedText = scrubbedText
                 )
 
@@ -283,8 +269,7 @@ class ScreenshotQueueWorker(
 
             // Call Gemini 3.5 Flash Lite in Batch for text-containing items
             val cloudResults = if (canUseCloud && cloudCandidates.isNotEmpty()) {
-                CloudAiBackendClient.analyzeBatchWithGemini(
-                    context = context,
+                geminiApiService.analyzeBatchWithGemini(
                     items = cloudCandidates,
                     categories = userCategories,
                     isPro = isProTier
@@ -342,7 +327,7 @@ class ScreenshotQueueWorker(
                 }.trim()
 
                 // Save processed screenshot record
-                dbHelper.recordProcessedScreenshot(
+                queueDao.recordProcessedScreenshot(
                     photoId = item.photoId,
                     filePath = prep.filePath,
                     dateAdded = item.dateAdded,
@@ -351,7 +336,7 @@ class ScreenshotQueueWorker(
                     eventTitle = parsed.suggestedEventTitle,
                     eventDateMillis = parsed.suggestedEventDateMillis,
                     targetCategoryId = parsed.targetCategoryId,
-                    status = "PROCESSING",
+                    status = QueueStatus.PROCESSING.name,
                     eventDescription = parsed.suggestedEventDescription,
                     summary = summary,
                     tags = semanticTagsStr,
@@ -370,7 +355,7 @@ class ScreenshotQueueWorker(
                     entitiesStr
                 }
 
-                dbHelper.indexPhotoFts(
+                ftsDao.indexPhotoFts(
                     photoId = item.photoId,
                     title = title,
                     scrubbedText = scrubbedText,
@@ -389,7 +374,7 @@ class ScreenshotQueueWorker(
                     categoryNames = if (!parsed.targetCategoryId.isNullOrBlank()) listOf(categoryDisplayName) else emptyList(),
                     customCategories = userCategories
                 )
-                dbHelper.savePhotoVector(item.photoId, localEmbedding, parsed.detectedIntent)
+                vectorDao.savePhotoVector(item.photoId, localEmbedding, parsed.detectedIntent)
 
                 // Enqueue for batch embedding ONLY if cloud is allowed for this item
                 val itemPrivacy = PrivacyPolicy.classify(scrubbedText, title, visualAnalysis.rawLabels)
@@ -413,14 +398,14 @@ class ScreenshotQueueWorker(
                     )
                 }
 
-                dbHelper.markQueueItemProcessed(item.photoId, "COMPLETED")
+                queueDao.markQueueItemProcessed(item.photoId, QueueStatus.COMPLETED)
             }
 
             // Step 4: Batch Neural Vector Embeddings (1 HTTP call for the entire batch!)
             if (canUseCloud && embeddingTextsToGenerate.isNotEmpty()) {
                 try {
                     val texts = embeddingTextsToGenerate.map { it.semanticText }
-                    val vectors = CloudAiBackendClient.getBatchEmbeddings(
+                    val vectors = geminiApiService.getBatchEmbeddings(
                         texts = texts,
                         apiKey = aiConfig.apiKey,
                         modelName = CloudAiConfigManager.DEFAULT_EMBEDDING_MODEL,
@@ -437,14 +422,14 @@ class ScreenshotQueueWorker(
                     }
 
                     if (vectorsToSave.isNotEmpty()) {
-                        dbHelper.savePhotoNeuralVectorsBatch(
+                        vectorDao.savePhotoNeuralVectorsBatch(
                             vectors = vectorsToSave,
                             modelName = CloudAiConfigManager.DEFAULT_EMBEDDING_MODEL,
                             modelVersion = "1.0"
                         )
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e("ScreenshotQueueWorker", "Batch embedding failed: ${e.message}", e)
+                    AppLogger.e("ScreenshotQueueWorker", "Batch embedding failed: ${e.message}", e)
                     hasCloudUpgradePending = true
                 }
             }
@@ -453,13 +438,14 @@ class ScreenshotQueueWorker(
             val completedIds = preprocessed.filter { !it.isJunk }.map { it.queueItem.photoId }
             if (completedIds.isNotEmpty()) {
                 CloudAiSyncNotifier.notifyBatchCompleted(completedIds)
+                PhotoSearchWidgetUpdater.updateAll(context)
             }
 
             if (hasCloudUpgradePending) {
                 CloudUpgradeWorker.enqueue(context)
             }
         } catch (e: Exception) {
-            android.util.Log.e("ScreenshotQueueWorker", "Batch processing failed: ${e.message}", e)
+            AppLogger.e("ScreenshotQueueWorker", "Batch processing failed: ${e.message}", e)
         }
     }
 

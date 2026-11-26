@@ -2,12 +2,17 @@ package com.example.test2.ai
 
 import android.content.Context
 import com.example.test2.ai.cards.QualityFlags
+import com.example.test2.data.local.dao.ActionCardDao
+import com.example.test2.data.local.dao.FtsSearchDao
+import com.example.test2.data.local.dao.ScreenshotQueueDao
+import com.example.test2.data.local.dao.VectorDao
 import com.example.test2.database.AppDatabaseHelper
 import com.example.test2.database.DefaultCategories
 import com.example.test2.database.ProcessedScreenshotRecord
 import com.example.test2.database.QueueStatus
 import com.example.test2.shared.models.Photo
 import com.example.test2.shared.repository.PhotoRepository
+import com.example.test2.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -19,8 +24,16 @@ import kotlinx.coroutines.withContext
 class PhotoProcessingCoordinator(
     private val context: Context,
     private val repository: PhotoRepository,
-    private val dbHelper: AppDatabaseHelper
+    private val queueDao: ScreenshotQueueDao,
+    private val ftsDao: FtsSearchDao,
+    private val vectorDao: VectorDao,
+    private val actionCardDao: ActionCardDao
 ) {
+    constructor(
+        context: Context,
+        repository: PhotoRepository,
+        dbHelper: AppDatabaseHelper
+    ) : this(context, repository, dbHelper, dbHelper, dbHelper, dbHelper)
 
     /**
      * Re-verifies a cached photo's category against newly added custom categories
@@ -43,7 +56,7 @@ class PhotoProcessingCoordinator(
             )
             if (recheck.targetCategoryId != null && recheck.targetCategoryId !in DefaultCategories.ALL_IDS) {
                 resolvedCatId = recheck.targetCategoryId
-                dbHelper.recordProcessedScreenshot(
+                queueDao.recordProcessedScreenshot(
                     photoId = photo.id,
                     filePath = photo.filePath,
                     dateAdded = photo.dateAdded,
@@ -90,18 +103,18 @@ class PhotoProcessingCoordinator(
             return@withContext
         }
 
-        android.util.Log.d("PhotoCoordinator", "Starting runOnDevicePipeline for ${photo.id}: ${photo.fileName}, filePath=${photo.filePath}")
+        AppLogger.d("PhotoCoordinator", "Starting runOnDevicePipeline for ${photo.id}: ${photo.fileName}, filePath=${photo.filePath}")
         // Step 2: Unified On-Device Vision & OCR Analysis
         val onDeviceResult = if (QualityFlags.SHARED_DECODE) {
             OnDeviceAnalysis.analyze(context, photo.id, photo.filePath, photo.title)
         } else null
 
         val visualAnalysis = onDeviceResult?.visual ?: LocalImageLabeler.analyze(context, photo.filePath)
-        android.util.Log.d("PhotoCoordinator", "visualAnalysis for ${photo.id}: nature=${visualAnalysis.isNature}, animal=${visualAnalysis.isAnimal}, labels=${visualAnalysis.rawLabels}")
+        AppLogger.d("PhotoCoordinator", "visualAnalysis for ${photo.id}: nature=${visualAnalysis.isNature}, animal=${visualAnalysis.isAnimal}, labels=${visualAnalysis.rawLabels}")
 
         // Save cards immediately on device if available
         if (QualityFlags.INSTANT_EXTRACTION && onDeviceResult != null && onDeviceResult.cards.isNotEmpty()) {
-            dbHelper.replaceActionCardsForPhoto(photo.id, onDeviceResult.cards)
+            actionCardDao.replaceActionCardsForPhoto(photo.id, onDeviceResult.cards)
             CloudAiSyncNotifier.notifyBatchCompleted(listOf(photo.id))
         }
 
@@ -118,7 +131,7 @@ class PhotoProcessingCoordinator(
             val semanticTagsStr = semanticTags.joinToString(" ")
             val fullSemanticText = "${photo.title} Thiên nhiên phong cảnh $semanticTagsStr".trim()
 
-            dbHelper.indexPhotoFts(
+            ftsDao.indexPhotoFts(
                 photoId = photo.id,
                 title = photo.title,
                 scrubbedText = fullSemanticText,
@@ -134,8 +147,8 @@ class PhotoProcessingCoordinator(
                     intent = "OTHER",
                     categoryNames = if (categoryNames.isNotBlank()) listOf(categoryNames) else emptyList()
                 )
-                dbHelper.savePhotoVector(photo.id, embedding, "OTHER")
-                dbHelper.enqueueScreenshot(
+                vectorDao.savePhotoVector(photo.id, embedding, "OTHER")
+                queueDao.enqueueScreenshot(
                     photoId = photo.id,
                     filePath = photo.filePath,
                     dateAdded = photo.dateAdded,
@@ -183,7 +196,7 @@ class PhotoProcessingCoordinator(
             val semanticTagsStr = semanticTags.joinToString(" ")
             val fullSemanticText = "${photo.title} $semanticTagsStr".trim()
 
-            dbHelper.indexPhotoFts(
+            ftsDao.indexPhotoFts(
                 photoId = photo.id,
                 title = photo.title,
                 scrubbedText = fullSemanticText,
@@ -199,9 +212,9 @@ class PhotoProcessingCoordinator(
                     intent = heuristic.detectedIntent,
                     categoryNames = if (categoryNames.isNotBlank()) listOf(categoryNames) else emptyList()
                 )
-                dbHelper.savePhotoVector(photo.id, embedding, heuristic.detectedIntent)
+                vectorDao.savePhotoVector(photo.id, embedding, heuristic.detectedIntent)
                 if (fullSemanticText.isNotBlank()) {
-                    dbHelper.enqueueScreenshot(
+                    queueDao.enqueueScreenshot(
                         photoId = photo.id,
                         filePath = photo.filePath,
                         dateAdded = photo.dateAdded,
@@ -224,7 +237,7 @@ class PhotoProcessingCoordinator(
                     it.equals("Poster", ignoreCase = true)
                 }
             if (hasInformativeVisual) {
-                dbHelper.enqueueScreenshot(
+                queueDao.enqueueScreenshot(
                     photoId = photo.id,
                     filePath = photo.filePath,
                     dateAdded = photo.dateAdded,
@@ -277,7 +290,7 @@ class PhotoProcessingCoordinator(
             if (semanticTagsStr.isNotBlank()) append(" ").append(semanticTagsStr)
         }.trim()
 
-        dbHelper.indexPhotoFts(
+        ftsDao.indexPhotoFts(
             photoId = photo.id,
             title = photo.title,
             scrubbedText = fullSemanticText,
@@ -294,7 +307,7 @@ class PhotoProcessingCoordinator(
                 categoryNames = if (categoryNames.isNotBlank()) listOf(categoryNames) else emptyList(),
                 customCategories = repository.categories.value
             )
-            dbHelper.savePhotoVector(photo.id, embedding, heuristic.detectedIntent)
+            vectorDao.savePhotoVector(photo.id, embedding, heuristic.detectedIntent)
         }
 
         repository.updatePhotoAiMetadata(
@@ -313,7 +326,7 @@ class PhotoProcessingCoordinator(
         )
 
         // Enqueue to background queue for progressive Cloud enrichment (Gemini batching & neural vectors)
-        dbHelper.enqueueScreenshot(
+        queueDao.enqueueScreenshot(
             photoId = photo.id,
             filePath = photo.filePath,
             dateAdded = photo.dateAdded,
@@ -347,7 +360,7 @@ class PhotoProcessingCoordinator(
 
         // Save cards immediately on device if available
         if (QualityFlags.INSTANT_EXTRACTION && onDeviceResult != null && onDeviceResult.cards.isNotEmpty()) {
-            dbHelper.replaceActionCardsForPhoto(photo.id, onDeviceResult.cards)
+            actionCardDao.replaceActionCardsForPhoto(photo.id, onDeviceResult.cards)
             CloudAiSyncNotifier.notifyBatchCompleted(listOf(photo.id))
         }
 
@@ -381,7 +394,7 @@ class PhotoProcessingCoordinator(
             .filter { it.id == parsed.targetCategoryId }
             .joinToString(" ") { it.name }
 
-        dbHelper.indexPhotoFts(
+        ftsDao.indexPhotoFts(
             photoId = photo.id,
             title = photo.title,
             scrubbedText = piiResult.scrubbedText,
@@ -397,7 +410,7 @@ class PhotoProcessingCoordinator(
             categoryNames = if (categoryNames.isNotBlank()) listOf(categoryNames) else emptyList(),
             customCategories = repository.categories.value
         )
-        dbHelper.savePhotoVector(photo.id, embedding, parsed.detectedIntent)
+        vectorDao.savePhotoVector(photo.id, embedding, parsed.detectedIntent)
 
         // 768D Neural Vector (Pro tier with API Key, only for CLOUD_ELIGIBLE)
         if (privacyDecision == PrivacyDecision.CLOUD_ELIGIBLE && repository.accountTier.value.isPro && piiResult.scrubbedText.isNotBlank()) {
@@ -405,14 +418,14 @@ class PhotoProcessingCoordinator(
             if (apiKey.isNotBlank()) {
                 val neuralVec = CloudAiBackendClient.getEmbedding(piiResult.scrubbedText, apiKey)
                 if (neuralVec != null) {
-                    dbHelper.savePhotoNeuralVector(photo.id, neuralVec)
+                    vectorDao.savePhotoNeuralVector(photo.id, neuralVec)
                 }
             }
         }
 
-        dbHelper.markQueueItemProcessed(photo.id, QueueStatus.COMPLETED)
+        queueDao.markQueueItemProcessed(photo.id, QueueStatus.COMPLETED)
 
-        dbHelper.recordProcessedScreenshot(
+        queueDao.recordProcessedScreenshot(
             photoId = photo.id,
             filePath = photo.filePath,
             dateAdded = photo.dateAdded,

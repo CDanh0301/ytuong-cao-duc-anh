@@ -14,7 +14,21 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
+import java.util.concurrent.atomic.AtomicBoolean
+
 class PhotoApp : Application(), ImageLoaderFactory {
+
+    companion object {
+        private val metadataDirty = AtomicBoolean(false)
+
+        fun markMetadataDirty() {
+            metadataDirty.set(true)
+        }
+
+        fun consumeMetadataDirty(): Boolean {
+            return metadataDirty.getAndSet(false)
+        }
+    }
 
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 

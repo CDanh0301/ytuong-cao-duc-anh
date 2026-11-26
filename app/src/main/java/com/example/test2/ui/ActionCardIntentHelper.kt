@@ -8,6 +8,7 @@ import android.net.Uri
 import android.provider.ContactsContract
 import android.widget.Toast
 import com.example.test2.ai.SmartHeuristicParser
+import com.example.test2.shared.models.Photo
 
 object ActionCardIntentHelper {
 
@@ -98,6 +99,15 @@ object ActionCardIntentHelper {
             context.startActivity(intent)
         } catch (e: Exception) {
             Toast.makeText(context, "Không thể mở ứng dụng Lịch: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun launchCalendarForPhoto(context: Context, photo: Photo): Boolean {
+        return try {
+            context.startActivity(SmartHeuristicParser.createCalendarIntentForPhoto(photo))
+            true
+        } catch (_: Exception) {
+            false
         }
     }
 }

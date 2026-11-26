@@ -13,6 +13,8 @@ import com.example.test2.ai.CloudAiConfigManager
 import com.example.test2.ai.LocalImageLabeler
 import com.example.test2.ai.VectorSemanticSearchEngine
 import com.example.test2.database.AppDatabaseHelper
+import com.example.test2.database.QueueStatus
+import com.example.test2.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -42,7 +44,8 @@ class CloudUpgradeWorker(
                     ExistingWorkPolicy.KEEP,
                     request
                 )
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                AppLogger.w("CloudUpgradeWorker", "Failed to enqueue worker", e)
             }
         }
     }
@@ -68,7 +71,7 @@ class CloudUpgradeWorker(
                 if (com.example.test2.ai.PrivacyPolicy.classify(scrubbedText, title, visualAnalysis.rawLabels) == com.example.test2.ai.PrivacyDecision.LOCAL_ONLY) {
                     dbHelper.updateQueueItemState(
                         photoId = item.photoId,
-                        status = "COMPLETED",
+                        status = QueueStatus.COMPLETED.name,
                         scrubbedText = scrubbedText,
                         needsCloudUpgrade = false
                     )
@@ -104,7 +107,7 @@ class CloudUpgradeWorker(
                 // Update SQLite queue entry
                 dbHelper.updateQueueItemState(
                     photoId = item.photoId,
-                    status = "COMPLETED",
+                    status = QueueStatus.COMPLETED.name,
                     scrubbedText = scrubbedText,
                     detectedIntent = parsed.detectedIntent,
                     eventTitle = parsed.suggestedEventTitle,
@@ -147,7 +150,8 @@ class CloudUpgradeWorker(
                         modelVersion = "1.0"
                     )
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                AppLogger.w("CloudUpgradeWorker", "Failed to enqueue worker", e)
             }
         }
 
