@@ -11,8 +11,8 @@ enum class PrivacyDecision {
 
 object PrivacyPolicy {
 
-    private val OTP_PATTERN = Regex("""(?i)\b(?:otp|mã\s*xác\s*thực|ma\s*xac\s*thuc|mã\s*xác\s*nhận|ma\s*xac\s*nhan)\D{0,20}\d{4,8}\b""")
-    private val CVV_PIN_PATTERN = Regex("""(?i)\b(?:cvv|cvc|csc|security\s*code|mã\s*bảo\s*mật|ma\s*bao\s*mat|mã\s*pin|ma\s*pin)\D{0,15}\d{3,6}\b""")
+    private val OTP_PATTERN = Regex("""(?i)\b(?:otp|mã\s*xác\s*thực|ma\s*xac\s*thuc|mã\s*xác\s*nhận|ma\s*xac\s*nhan)(?!\s+(?:đơn|don|order|hóa|hoa|invoice|email|sản|san|vé|ve)\b)\D{0,20}\d{4,8}\b""")
+    private val CVV_PIN_PATTERN = Regex("""(?i)\b(?:cvv|cvc|csc|security\s*code|mã\s*bảo\s*mật|ma\s*bao\s*mat|mã\s*pin|ma\s*pin)(?!\s+(?:đơn|don|order)\b)\D{0,15}\d{3,6}\b""")
     private val CREDIT_CARD_MASKED_PATTERN = Regex("""\*{4}-\*{4}-\*{4}-\d{4}""")
     private val RAW_CREDIT_CARD_PATTERN = Regex("""\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|3(?:0[0-5]|[68][0-9])[0-9]{11}|6(?:011|5[0-9]{2})[0-9]{12})\b""")
     private val EXPIRY_PATTERN = Regex("""(?i)\b(?:ngày\s*hết\s*hạn|ngay\s*het\s*han|valid\s*thru|expiry|exp\s*date)\b""")

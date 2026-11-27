@@ -199,4 +199,15 @@ class CloudPrivacyGatewayTest {
         )
         assertTrue("LOCAL_ONLY photo must still match via on-device engine", localMatches.contains("p_cccd_borderline"))
     }
+
+    @Test
+    fun testTimestampPhotoTitleAndEverydayProductSpecsRemainCloudEligible() {
+        val result = CloudPrivacyGateway.prepareForAnalysis(
+            rawOrScrubbedText = "Pin dự phòng Anker 20000mAh sạc nhanh 65W giá 850.000đ mã vạch 8934563123456",
+            photoTitle = "1764231847123"
+        )
+        assertEquals(PrivacyDecision.CLOUD_ELIGIBLE, result.decision)
+        assertFalse(result.scrubbedText.contains("[REDACTED_SECRET]"))
+        assertFalse(result.scrubbedText.contains("[CREDIT_CARD]"))
+    }
 }

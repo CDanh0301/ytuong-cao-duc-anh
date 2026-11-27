@@ -101,4 +101,46 @@ class PiiScrubberExpandedTest {
         assertTrue(cloud.scrubbedText.contains("Bệnh viện 19-8"))
         assertEquals(PrivacyDecision.CLOUD_ELIGIBLE, PrivacyPolicy.classify(cloud.scrubbedText))
     }
+
+    @Test
+    fun testNoFalsePositivesOnPinBatterySpecsBoardingPassBarcodesAndOrderIds() {
+        val everydayNonSensitive = """
+            Boarding Pass VN1234 Chuyến bay Hà Nội - TP.HCM ngày 28/11/2026
+            Boarding Pass: QH204 Cổng 12
+            Pass lại áo khoác mùa đông 250k, Game Pass Ultimate giảm giá
+            Sạc dự phòng Anker Pin 5000mAh, Pin: 20000 mAh, Dung lượng pin: 5000 mAh, Pin Lithium
+            Mã xác thực Email, Mã xác nhận đơn hàng: 123456, Đổi mật khẩu mới, Password reset
+            Barcode sản phẩm 8934563123456, Mã vận đơn: 261127123456, Đơn hàng 987654321
+        """.trimIndent()
+
+        val cloud = PiiScrubber.scrubForCloud(everydayNonSensitive)
+        assertFalse("Everyday commercial/event text must not trigger false PII redaction: ${cloud.scrubbedText}", cloud.hasPiiRedacted)
+        assertFalse(cloud.scrubbedText.contains("[REDACTED_SECRET]"))
+        assertFalse(cloud.scrubbedText.contains("[CREDIT_CARD]"))
+        assertFalse(cloud.scrubbedText.contains("[ID_NUMBER]"))
+        assertEquals(PrivacyDecision.CLOUD_ELIGIBLE, PrivacyPolicy.classify(cloud.scrubbedText, photoTitle = "1764231847123"))
+    }
+
+    @Test
+    fun testRealLabeledSecretsPinsAndPaymentCardsRemainBlocked() {
+        val labeledPassAndPin = "Pass: SecretPass@99, PIN: 4567, Mật khẩu đăng nhập: Abc@9876"
+        val secretRes = PiiScrubber.scrubForCloud(labeledPassAndPin)
+        assertTrue(secretRes.hasPiiRedacted)
+        assertFalse(secretRes.scrubbedText.contains("SecretPass@99"))
+        assertFalse(secretRes.scrubbedText.contains("4567"))
+        assertFalse(secretRes.scrubbedText.contains("Abc@9876"))
+        assertEquals(PrivacyDecision.LOCAL_ONLY, PrivacyPolicy.classify(secretRes.scrubbedText))
+
+        val validLuhnCard = "Số 4532 0151 2830 0362"
+        val cardRes = PiiScrubber.scrubForCloud(validLuhnCard)
+        assertTrue(cardRes.hasPiiRedacted)
+        assertTrue(cardRes.scrubbedText.contains("[CREDIT_CARD]"))
+        assertEquals(PrivacyDecision.LOCAL_ONLY, PrivacyPolicy.classify(cardRes.scrubbedText))
+
+        val contextCard = "Thẻ tín dụng Visa 4111-2222-3333-4444"
+        val contextCardRes = PiiScrubber.scrubForCloud(contextCard)
+        assertTrue(contextCardRes.hasPiiRedacted)
+        assertTrue(contextCardRes.scrubbedText.contains("[CREDIT_CARD]"))
+        assertEquals(PrivacyDecision.LOCAL_ONLY, PrivacyPolicy.classify(contextCardRes.scrubbedText))
+    }
 }

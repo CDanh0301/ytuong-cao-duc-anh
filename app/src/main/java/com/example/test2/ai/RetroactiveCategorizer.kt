@@ -374,6 +374,7 @@ object RetroactiveCategorizer {
         val expandedConcepts = VisualConceptExpander.expandCategoryConcepts(catName)
         val cloudCandidateSnippets = mutableListOf<CategoryCandidateSnippet>()
         val localOnlyCandidateSnippets = mutableListOf<CategoryCandidateSnippet>()
+        val visualLabelsByPhotoId = mutableMapOf<String, List<String>>()
 
         for (p in unassignedPhotos) {
             var effectivePhoto = p
@@ -395,6 +396,9 @@ object RetroactiveCategorizer {
                 try {
                     val onDemandVisual = LocalImageLabeler.analyze(context, effectivePhoto.filePath)
                     visualRawLabels = onDemandVisual.rawLabels
+                    if (visualRawLabels.isNotEmpty()) {
+                        visualLabelsByPhotoId[p.id] = visualRawLabels
+                    }
                     if (onDemandVisual.vietnameseSemanticTags.isNotEmpty()) {
                         effectivePhoto = effectivePhoto.copy(semanticTags = onDemandVisual.vietnameseSemanticTags)
                     }
@@ -455,7 +459,7 @@ object RetroactiveCategorizer {
 
         // Local-first verification for LOCAL_ONLY sensitive documents (never leaves device)
         if (localOnlyCandidateSnippets.isNotEmpty()) {
-            fallbackVerifyWithSmartHeuristic(category, localOnlyCandidateSnippets, unassignedPhotos, matchedIds)
+            fallbackVerifyWithSmartHeuristic(category, localOnlyCandidateSnippets, unassignedPhotos, matchedIds, visualLabelsByPhotoId)
         }
 
         // Batch AI Verification for CLOUD_ELIGIBLE borderline candidates with SmartHeuristic fallback
@@ -477,11 +481,11 @@ object RetroactiveCategorizer {
                     }
                 } catch (e: Exception) {
                     AppLogger.w("RetroactiveCategorizer", "AI candidate verification fallback to Heuristics: ${e.message}", e)
-                    fallbackVerifyWithSmartHeuristic(category, cloudCandidateSnippets, unassignedPhotos, matchedIds)
+                    fallbackVerifyWithSmartHeuristic(category, cloudCandidateSnippets, unassignedPhotos, matchedIds, visualLabelsByPhotoId)
                 }
             } else {
                 // Local-first Fallback: When offline or unconfigured, use SmartHeuristicParser
-                fallbackVerifyWithSmartHeuristic(category, cloudCandidateSnippets, unassignedPhotos, matchedIds)
+                fallbackVerifyWithSmartHeuristic(category, cloudCandidateSnippets, unassignedPhotos, matchedIds, visualLabelsByPhotoId)
             }
         }
 
@@ -507,16 +511,30 @@ object RetroactiveCategorizer {
         category: Category,
         candidateSnippets: List<CategoryCandidateSnippet>,
         photos: List<Photo>,
-        matchedIds: MutableSet<String>
+        matchedIds: MutableSet<String>,
+        visualLabelsByPhotoId: Map<String, List<String>> = emptyMap()
     ) {
         val photoMap = photos.associateBy { it.id }
         for (candidate in candidateSnippets) {
             val photo = photoMap[candidate.id] ?: continue
             try {
+                val labels = visualLabelsByPhotoId[candidate.id].orEmpty()
+                val hasFace = labels.any {
+                    it.equals("Person", ignoreCase = true) ||
+                        it.equals("Face", ignoreCase = true) ||
+                        it.equals("Selfie", ignoreCase = true) ||
+                        it.equals("Portrait", ignoreCase = true)
+                } || photo.semanticTags.any {
+                    it.equals("chân dung", ignoreCase = true) ||
+                        it.equals("khuôn mặt", ignoreCase = true) ||
+                        it.equals("con người", ignoreCase = true)
+                }
                 val parsed = SmartHeuristicParser.parse(
                     scrubbedText = candidate.textSnippet,
                     photoTitle = candidate.title,
-                    customCategories = listOf(category)
+                    customCategories = listOf(category),
+                    hasFace = hasFace,
+                    visualLabels = labels
                 )
                 if (parsed.targetCategoryId == category.id) {
                     matchedIds.add(candidate.id)
