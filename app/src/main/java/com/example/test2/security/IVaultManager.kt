@@ -1,10 +1,8 @@
 package com.example.test2.security
 
-import android.content.Intent
-import android.net.Uri
-
 /**
- * Interface abstracting Privacy Vault encryption, eviction, restoration, and exemption rules.
+ * Pure interface abstracting Privacy Vault encryption, eviction, restoration, and exemption rules
+ * without exposing Android UI/Intent/Uri types.
  */
 interface IVaultManager {
     fun isVaultEnabled(): Boolean
@@ -24,7 +22,6 @@ interface IVaultManager {
     fun hasPromptedConsent(): Boolean
     fun setPromptedConsent(prompted: Boolean)
     fun hasAllFilesAccess(): Boolean
-    fun getManageAllFilesIntent(): Intent
     fun sanitizeRestoreFileName(rawTitle: String, encryptedFilePath: String, fallbackFileName: String): String
     fun beginInternalEviction()
     fun endInternalEviction()
@@ -32,7 +29,7 @@ interface IVaultManager {
     fun hasRemainingEncryptedFiles(): Boolean
 
     suspend fun vaultAndEvictScreenshot(
-        sourceUri: Uri?,
+        sourceUriString: String?,
         sourcePath: String,
         originalFileName: String
     ): VaultResult?

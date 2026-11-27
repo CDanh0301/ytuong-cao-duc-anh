@@ -27,16 +27,21 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -44,8 +49,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
@@ -64,13 +67,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
-import com.example.test2.database.DefaultCategories
 import androidx.compose.ui.text.intl.Locale
 import androidx.compose.ui.text.intl.LocaleList
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -78,18 +82,14 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.test2.shared.models.ActionCardType
 import com.example.test2.shared.models.Category
+import com.example.test2.shared.models.DefaultCategories
 import com.example.test2.shared.models.Folder
 import com.example.test2.shared.models.Photo
 import com.example.test2.shared.models.PhotoFilter
 import com.example.test2.shared.models.UserAccountTier
-import androidx.compose.material.icons.automirrored.filled.ViewList
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.Apps
-import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.ViewAgenda
 import com.example.test2.ui.GalleryDisplayMode
+import com.example.test2.ui.components.AppScreenHeader
+import com.example.test2.ui.theme.AppColors
 import kotlinx.coroutines.delay
 import java.io.File
 
@@ -127,7 +127,6 @@ fun PhotoGalleryScreen(
     val activeFolder = folders.find { it.id == currentFilter.folderId }
     val activeCategory = categories.find { it.id == currentFilter.categoryId }
 
-    // Preserve local composition state for Vietnamese IMEs (Telex/VNI)
     var searchTextFieldValue by remember {
         mutableStateOf(TextFieldValue(currentFilter.searchQuery, selection = TextRange(currentFilter.searchQuery.length)))
     }
@@ -150,14 +149,14 @@ fun PhotoGalleryScreen(
     }
 
     val headingTitle = when {
-        currentFilter.onlyFavorites -> "Ảnh yêu thích"
-        activeActionCardType == ActionCardType.ADDRESS -> "Địa chỉ & Địa điểm"
-        activeActionCardType == ActionCardType.PAYMENT -> "Thông tin chuyển khoản"
-        activeActionCardType == ActionCardType.CONTACT -> "Liên hệ & Danh bạ"
-        activeActionCardType == ActionCardType.EVENT -> "Lịch hẹn & Sự kiện"
-        activeFolder != null -> activeFolder.name
-        activeCategory != null -> activeCategory.name
-        else -> "Tất cả ảnh"
+        currentFilter.onlyFavorites -> "Ảnh yêu thích."
+        activeActionCardType == ActionCardType.ADDRESS -> "Địa chỉ & Địa điểm."
+        activeActionCardType == ActionCardType.PAYMENT -> "Chuyển khoản."
+        activeActionCardType == ActionCardType.CONTACT -> "Liên hệ."
+        activeActionCardType == ActionCardType.EVENT -> "Lịch hẹn & Sự kiện."
+        activeFolder != null -> "${activeFolder.name}."
+        activeCategory != null -> "${activeCategory.name}."
+        else -> "Tất cả ảnh."
     }
 
     val displayPhotos = photos
@@ -171,82 +170,64 @@ fun PhotoGalleryScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFFF8FAFC))
+            .background(AppColors.CanvasCream)
     ) {
-        // App Header Bar matching index.html
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.White)
-                .padding(top = 8.dp, bottom = 4.dp)
+                .background(AppColors.CanvasCream)
+                .padding(bottom = 4.dp)
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = headingTitle,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF0F172A)
-                    )
-                    Text(
-                        text = "${displayPhotos.size} ảnh",
-                        fontSize = 13.sp,
-                        color = Color(0xFF64748B)
-                    )
-                }
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Favorite filter toggle button
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(if (currentFilter.onlyFavorites) Color(0xFFFEE2E2) else Color(0xFFF1F5F9))
-                            .border(
-                                1.dp,
-                                if (currentFilter.onlyFavorites) Color(0xFFFCA5A5) else Color(0xFFE2E8F0),
-                                CircleShape
-                            )
-                            .clickable { onToggleFavoriteFilter() },
-                        contentAlignment = Alignment.Center
+            AppScreenHeader(
+                icon = Icons.Default.Photo,
+                title = headingTitle,
+                subtitle = "${displayPhotos.size} ảnh",
+                trailingContent = {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = if (currentFilter.onlyFavorites) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                            contentDescription = "Lọc ảnh yêu thích",
-                            tint = if (currentFilter.onlyFavorites) Color(0xFFEF4444) else Color(0xFF64748B),
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-
-                    // Add Photo button (only kept on header when user hasn't granted access to all images)
-                    if (!hasStoragePermission) {
                         Box(
                             modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF2563EB))
-                                .clickable { onAddPhotoClick() },
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(if (currentFilter.onlyFavorites) AppColors.TerracottaLight else AppColors.SurfaceAlabaster)
+                                .border(
+                                    1.dp,
+                                    if (currentFilter.onlyFavorites) AppColors.TerracottaAlert.copy(alpha = 0.4f) else AppColors.BorderSand,
+                                    RoundedCornerShape(14.dp)
+                                )
+                                .clickable { onToggleFavoriteFilter() },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "Thêm ảnh",
-                                tint = Color.White,
-                                modifier = Modifier.size(22.dp)
+                                imageVector = if (currentFilter.onlyFavorites) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                contentDescription = "Lọc ảnh yêu thích",
+                                tint = if (currentFilter.onlyFavorites) AppColors.TerracottaAlert else AppColors.WarmTaupeText,
+                                modifier = Modifier.size(19.dp)
                             )
+                        }
+
+                        if (!hasStoragePermission) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(AppColors.ForestTeal)
+                                    .clickable { onAddPhotoClick() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Thêm ảnh",
+                                    tint = AppColors.SurfaceAlabaster,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
                 }
-            }
+            )
 
             // Search Bar with Vietnamese IME (Telex/VNI) support
             OutlinedTextField(
@@ -258,7 +239,7 @@ fun PhotoGalleryScreen(
                     Text(
                         if (accountTier.isPro) "Tìm kiếm theo ý nghĩa (vd: cây cối, xe cộ, thuốc, tivi)..." else "Tìm kiếm ảnh & văn bản OCR (Nâng cấp Pro để bật tìm kiếm ngữ nghĩa)...",
                         fontSize = 13.sp,
-                        color = Color(0xFF94A3B8),
+                        color = AppColors.WarmMutedText,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -267,7 +248,7 @@ fun PhotoGalleryScreen(
                     Icon(
                         Icons.Default.Search,
                         contentDescription = null,
-                        tint = Color(0xFF94A3B8),
+                        tint = AppColors.WarmMutedText,
                         modifier = Modifier.size(20.dp)
                     )
                 },
@@ -277,7 +258,7 @@ fun PhotoGalleryScreen(
                             searchTextFieldValue = TextFieldValue("")
                             onSearchChange("")
                         }) {
-                            Icon(Icons.Default.Close, contentDescription = "Xóa tìm kiếm", tint = Color(0xFF94A3B8))
+                            Icon(Icons.Default.Close, contentDescription = "Xóa tìm kiếm", tint = AppColors.WarmMutedText)
                         }
                     }
                 },
@@ -292,88 +273,88 @@ fun PhotoGalleryScreen(
                     }
                 ),
                 singleLine = true,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(16.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = Color(0xFFF8FAFC),
-                    unfocusedContainerColor = Color(0xFFF8FAFC),
-                    focusedBorderColor = Color(0xFF3B82F6),
-                    unfocusedBorderColor = Color(0xFFE2E8F0)
+                    focusedContainerColor = AppColors.SurfaceAlabaster,
+                    unfocusedContainerColor = AppColors.SurfaceAlabaster,
+                    focusedBorderColor = AppColors.ForestTeal,
+                    unfocusedBorderColor = AppColors.BorderSand
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .padding(horizontal = 18.dp, vertical = 4.dp)
             )
 
             // Vector Semantic Search Status & Pro Info Pill
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 2.dp),
+                    .padding(horizontal = 18.dp, vertical = 3.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (accountTier.isPro) {
                     Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color(0xFFF3E8FF))
-                            .border(1.dp, Color(0xFFD8B4FE), RoundedCornerShape(6.dp))
-                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(AppColors.PlumMutedLight)
+                            .border(1.dp, AppColors.PlumMuted.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 9.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (isVectorIndexing) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(11.dp),
                                 strokeWidth = 1.8.dp,
-                                color = Color(0xFF7E22CE)
+                                color = AppColors.PlumMuted
                             )
                         } else {
                             Icon(
                                 Icons.Default.AutoAwesome,
                                 contentDescription = null,
-                                tint = Color(0xFF7E22CE),
+                                tint = AppColors.PlumMuted,
                                 modifier = Modifier.size(13.dp)
                             )
                         }
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = if (isVectorIndexing) "Đang cập nhật chỉ mục ngữ nghĩa Pro..." else "Tìm kiếm ngữ nghĩa Vector đang bật",
+                            text = if (isVectorIndexing) "Đang cập nhật chỉ mục ngữ nghĩa Pro..." else "Tìm kiếm ngữ nghĩa đang bật",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF6B21A8)
+                            color = AppColors.PlumMuted
                         )
                     }
                 } else {
                     Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color(0xFFF1F5F9))
-                            .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(6.dp))
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(AppColors.WarmSandSoft)
+                            .border(1.dp, AppColors.BorderSand, RoundedCornerShape(10.dp))
                             .clickable { showSemanticSearchDialog = true }
-                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                            .padding(horizontal = 9.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             Icons.Default.Lock,
                             contentDescription = "Khóa",
-                            tint = Color(0xFF64748B),
+                            tint = AppColors.WarmTaupeText,
                             modifier = Modifier.size(12.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Bật tìm kiếm ngữ nghĩa Vector",
+                            text = "Bật tìm kiếm ngữ nghĩa",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
-                            color = Color(0xFF475569)
+                            color = AppColors.WarmTaupeText
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Spacer(modifier = Modifier.width(5.dp))
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(Color(0xFF8B5CF6))
-                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                                .clip(RoundedCornerShape(5.dp))
+                                .background(AppColors.OchreGold)
+                                .padding(horizontal = 5.dp, vertical = 1.dp)
                         ) {
-                            Text("PRO", fontSize = 8.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text("PRO", fontSize = 8.5.sp, fontWeight = FontWeight.Bold, color = AppColors.SurfaceAlabaster)
                         }
                     }
                 }
@@ -382,18 +363,18 @@ fun PhotoGalleryScreen(
                     Text(
                         text = "${semanticMatchScores.size} kết quả ngữ nghĩa",
                         fontSize = 11.sp,
-                        color = Color(0xFF7E22CE),
+                        color = AppColors.PlumMuted,
                         fontWeight = FontWeight.Medium
                     )
                 }
             }
 
-            // Smart Action Card Tabs (Replaces Category Carousel to avoid clutter)
+            // Smart Action Card Tabs
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 18.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -402,71 +383,61 @@ fun PhotoGalleryScreen(
                 val payCount = actionCardPhotoCounts[ActionCardType.PAYMENT] ?: 0
                 val contactCount = actionCardPhotoCounts[ActionCardType.CONTACT] ?: 0
 
-                // 1. Tất cả ảnh Tab
                 ActionCardTabPill(
                     label = "Tất cả ảnh",
                     badgeCount = allCount,
-                    color = Color(0xFF2563EB),
+                    color = AppColors.ForestTeal,
                     isActive = activeActionCardType == ActionCardType.ALL && currentFilter.categoryId == null,
                     onClick = { onSelectActionCardType(ActionCardType.ALL) }
                 )
 
-                // 2. 📍 Địa chỉ Tab
                 ActionCardTabPill(
                     label = "📍 Địa chỉ",
                     badgeCount = addrCount,
-                    color = Color(0xFFEF4444),
+                    color = AppColors.TerracottaAlert,
                     isActive = activeActionCardType == ActionCardType.ADDRESS,
                     onClick = {
-                        if (activeActionCardType == ActionCardType.ADDRESS) {
-                            onSelectActionCardType(ActionCardType.ALL)
-                        } else {
-                            onSelectActionCardType(ActionCardType.ADDRESS)
-                        }
+                        onSelectActionCardType(
+                            if (activeActionCardType == ActionCardType.ADDRESS) ActionCardType.ALL else ActionCardType.ADDRESS
+                        )
                     }
                 )
 
-                // 3. 💳 Chuyển khoản Tab
                 ActionCardTabPill(
                     label = "💳 Chuyển khoản",
                     badgeCount = payCount,
-                    color = Color(0xFF0EA5E9),
+                    color = AppColors.OchreGold,
                     isActive = activeActionCardType == ActionCardType.PAYMENT,
                     onClick = {
-                        if (activeActionCardType == ActionCardType.PAYMENT) {
-                            onSelectActionCardType(ActionCardType.ALL)
-                        } else {
-                            onSelectActionCardType(ActionCardType.PAYMENT)
-                        }
+                        onSelectActionCardType(
+                            if (activeActionCardType == ActionCardType.PAYMENT) ActionCardType.ALL else ActionCardType.PAYMENT
+                        )
                     }
                 )
 
-                // 4. 👤 Liên hệ Tab
                 ActionCardTabPill(
                     label = "👤 Liên hệ",
                     badgeCount = contactCount,
-                    color = Color(0xFF8B5CF6),
+                    color = AppColors.SageOlive,
                     isActive = activeActionCardType == ActionCardType.CONTACT,
                     onClick = {
-                        if (activeActionCardType == ActionCardType.CONTACT) {
-                            onSelectActionCardType(ActionCardType.ALL)
-                        } else {
-                            onSelectActionCardType(ActionCardType.CONTACT)
-                        }
+                        onSelectActionCardType(
+                            if (activeActionCardType == ActionCardType.CONTACT) ActionCardType.ALL else ActionCardType.CONTACT
+                        )
                     }
                 )
             }
         }
 
-        // Active Filter Banner matching index.html
+        // Active Filter Banner
         if (hasActiveFilter) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFFEFF6FF))
-                    .border(1.dp, Color(0xFFBFDBFE), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 18.dp, vertical = 5.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(AppColors.ForestTealSoft)
+                    .border(1.dp, AppColors.ForestTeal.copy(alpha = 0.2f), RoundedCornerShape(14.dp))
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
                 Row(
@@ -482,12 +453,12 @@ fun PhotoGalleryScreen(
                             text = "Bộ lọc:",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1E40AF)
+                            color = AppColors.ForestTeal
                         )
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFF2563EB))
+                                .background(AppColors.ForestTeal)
                                 .padding(horizontal = 8.dp, vertical = 2.dp)
                         ) {
                             Text(
@@ -506,7 +477,7 @@ fun PhotoGalleryScreen(
                                 },
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Color.White
+                                color = AppColors.SurfaceAlabaster
                             )
                         }
                     }
@@ -515,14 +486,14 @@ fun PhotoGalleryScreen(
                         modifier = Modifier
                             .size(24.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFFDBEAFE))
+                            .background(AppColors.ForestTeal.copy(alpha = 0.14f))
                             .clickable { onClearFilters() },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             Icons.Default.Close,
                             contentDescription = "Xóa bộ lọc",
-                            tint = Color(0xFF1E40AF),
+                            tint = AppColors.ForestTeal,
                             modifier = Modifier.size(14.dp)
                         )
                     }
@@ -530,15 +501,15 @@ fun PhotoGalleryScreen(
             }
         }
 
-        // Graceful Degradation Banner (IDEA.md Step 4)
+        // Graceful Degradation Banner
         if (!accountTier.isPro && accountTier.aiScansUsedThisMonth >= accountTier.aiScansQuota) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFFFEF3C7))
-                    .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 18.dp, vertical = 5.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(AppColors.OchreGoldLight)
+                    .border(1.dp, AppColors.OchreGold.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
                     .padding(12.dp)
             ) {
                 Row(
@@ -547,16 +518,16 @@ fun PhotoGalleryScreen(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFF59E0B)),
+                            .size(34.dp)
+                            .clip(RoundedCornerShape(11.dp))
+                            .background(AppColors.OchreGold),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             Icons.Default.AutoAwesome,
                             contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(18.dp)
+                            tint = AppColors.SurfaceAlabaster,
+                            modifier = Modifier.size(17.dp)
                         )
                     }
                     Spacer(modifier = Modifier.width(10.dp))
@@ -571,12 +542,12 @@ fun PhotoGalleryScreen(
                             text = "Hạn mức AI tháng này (Tự động đặt lại sau $remainingDays ngày)",
                             fontSize = 12.5.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF92400E)
+                            color = AppColors.OchreGoldDark
                         )
                         Text(
                             text = "Bạn đã dùng hết ${accountTier.aiScansQuota} lượt AI thông minh tháng này. Nâng cấp Pro để tiếp tục tự động hóa không giới hạn!",
                             fontSize = 11.5.sp,
-                            color = Color(0xFFB45309),
+                            color = AppColors.OchreGoldDark.copy(alpha = 0.85f),
                             lineHeight = 15.sp
                         )
                     }
@@ -584,14 +555,15 @@ fun PhotoGalleryScreen(
             }
         }
 
-        // Permission Prompt Banner (if not granted)
+        // Permission Prompt Banner
         if (!hasStoragePermission) {
             OutlinedCard(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.outlinedCardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.outlinedCardColors(containerColor = AppColors.SurfaceAlabaster),
+                border = androidx.compose.foundation.BorderStroke(1.dp, AppColors.BorderSand),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .padding(horizontal = 18.dp, vertical = 5.dp)
             ) {
                 Row(
                     modifier = Modifier.padding(14.dp),
@@ -599,16 +571,16 @@ fun PhotoGalleryScreen(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFEFF6FF)),
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(13.dp))
+                            .background(AppColors.ForestTealSoft),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             Icons.Default.Security,
                             contentDescription = null,
-                            tint = Color(0xFF2563EB),
-                            modifier = Modifier.size(24.dp)
+                            tint = AppColors.ForestTeal,
+                            modifier = Modifier.size(22.dp)
                         )
                     }
                     Spacer(modifier = Modifier.width(12.dp))
@@ -617,19 +589,19 @@ fun PhotoGalleryScreen(
                             text = "Tự động tải ảnh từ thiết bị",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A)
+                            color = AppColors.DeepPineText
                         )
                         Text(
                             text = "Cấp quyền để tự động tải và sắp xếp tất cả ảnh trên thiết bị của bạn mà không cần chọn từng ảnh một.",
                             fontSize = 12.sp,
-                            color = Color(0xFF64748B),
+                            color = AppColors.WarmTaupeText,
                             lineHeight = 16.sp
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Button(
                             onClick = onRequestPermission,
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = AppColors.ForestTeal),
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                         ) {
                             Text("Cho phép truy cập", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
@@ -649,13 +621,16 @@ fun PhotoGalleryScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                    .padding(horizontal = 18.dp, vertical = 5.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(AppColors.SageOliveLight)
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
-                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color(0xFF2563EB))
+                CircularProgressIndicator(modifier = Modifier.size(15.dp), strokeWidth = 2.dp, color = AppColors.ForestTeal)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(syncText, fontSize = 12.sp, color = Color(0xFF64748B))
+                Text(syncText, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = AppColors.ForestTeal)
             }
         }
 
@@ -671,23 +646,24 @@ fun PhotoGalleryScreen(
                     Box(
                         modifier = Modifier
                             .size(64.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFEFF6FF)),
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(AppColors.WarmSand),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             Icons.Default.Photo,
                             contentDescription = null,
-                            tint = Color(0xFF3B82F6),
-                            modifier = Modifier.size(32.dp)
+                            tint = AppColors.ForestTeal,
+                            modifier = Modifier.size(30.dp)
                         )
                     }
                     Spacer(modifier = Modifier.height(14.dp))
                     Text(
                         text = if (hasActiveFilter) "Không tìm thấy ảnh nào" else "Chưa có ảnh chụp màn hình nào",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A)
+                        fontFamily = FontFamily.Serif,
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = AppColors.ForestTeal
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
@@ -697,25 +673,25 @@ fun PhotoGalleryScreen(
                             "Cho phép cấp quyền ở trên để tự động theo dõi ảnh chụp màn hình, hoặc bấm thêm ảnh tùy chọn."
                         else
                             "Chưa tìm thấy ảnh chụp màn hình trên thiết bị. Bạn có thể chụp màn hình mới hoặc bấm '+' để thêm bất kỳ bức ảnh nào bạn muốn lưu trữ.",
-                        fontSize = 13.5.sp,
-                        color = Color(0xFF64748B),
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        fontSize = 13.sp,
+                        color = AppColors.WarmTaupeText,
+                        textAlign = TextAlign.Center,
                         lineHeight = 18.sp
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     if (hasActiveFilter) {
                         Button(
                             onClick = onClearFilters,
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = AppColors.ForestTeal)
                         ) {
                             Text("Xóa bộ lọc")
                         }
                     } else {
                         Button(
                             onClick = onAddPhotoClick,
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = AppColors.ForestTeal)
                         ) {
                             Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
@@ -733,57 +709,53 @@ fun PhotoGalleryScreen(
 
             val spacing = when (displayMode) {
                 GalleryDisplayMode.BIG_PREVIEW -> 10.dp
-                GalleryDisplayMode.SMALL_PREVIEW -> 5.dp
+                GalleryDisplayMode.SMALL_PREVIEW -> 6.dp
                 GalleryDisplayMode.LIST -> 10.dp
             }
 
             LazyVerticalGrid(
                 columns = GridCells.Fixed(spanCount),
-                contentPadding = PaddingValues(if (displayMode == GalleryDisplayMode.SMALL_PREVIEW) 8.dp else 12.dp),
+                contentPadding = PaddingValues(
+                    start = if (displayMode == GalleryDisplayMode.SMALL_PREVIEW) 12.dp else 18.dp,
+                    end = if (displayMode == GalleryDisplayMode.SMALL_PREVIEW) 12.dp else 18.dp,
+                    top = 4.dp,
+                    bottom = 96.dp
+                ),
                 horizontalArrangement = Arrangement.spacedBy(spacing),
                 verticalArrangement = Arrangement.spacedBy(spacing),
                 modifier = Modifier.fillMaxSize()
             ) {
-                // Section Header with Photos Count & Display Mode Switcher
                 item(span = { GridItemSpan(spanCount) }) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 6.dp),
+                            .padding(bottom = 4.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Default.Photo,
-                                contentDescription = null,
-                                tint = Color(0xFF334155),
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "Ảnh",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A)
+                                color = AppColors.DeepPineText
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0xFFE2E8F0))
+                                    .background(AppColors.WarmSand)
                                     .padding(horizontal = 8.dp, vertical = 2.dp)
                             ) {
                                 Text(
                                     text = "${displayPhotos.size}",
                                     fontSize = 11.5.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = Color(0xFF475569)
+                                    color = AppColors.WarmTaupeText
                                 )
                             }
                         }
 
-                        // Display Mode Switcher (Big Preview, Small Preview, List)
                         DisplayModeSelector(
                             currentMode = displayMode,
                             onModeSelected = onDisplayModeChange
@@ -817,6 +789,7 @@ fun PhotoGalleryScreen(
                                 photo = photo,
                                 categories = categories,
                                 semanticScore = semanticScore,
+                                showTitle = false,
                                 onClick = { onPhotoClick(photo) },
                                 onToggleFavorite = { onToggleFavorite(photo.id) }
                             )
@@ -830,30 +803,36 @@ fun PhotoGalleryScreen(
     if (showSemanticSearchDialog) {
         AlertDialog(
             onDismissRequest = { showSemanticSearchDialog = false },
+            containerColor = AppColors.SurfaceAlabaster,
             icon = {
                 Icon(
                     Icons.Default.AutoAwesome,
                     contentDescription = null,
-                    tint = Color(0xFF7E22CE),
+                    tint = AppColors.PlumMuted,
                     modifier = Modifier.size(28.dp)
                 )
             },
             title = {
-                Text("Tìm kiếm ngữ nghĩa Vector nâng cao", fontWeight = FontWeight.Bold)
+                Text(
+                    "Tìm kiếm ngữ nghĩa nâng cao",
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AppColors.ForestTeal
+                )
             },
             text = {
                 Column {
                     Text(
                         text = "Nâng cấp lên gói Pro để tìm kiếm ảnh chụp màn hình theo ý nghĩa, khái niệm và từ đồng nghĩa—không chỉ từ khóa chính xác.",
                         fontSize = 13.5.sp,
-                        color = Color(0xFF334155),
+                        color = AppColors.DeepPineText,
                         lineHeight = 18.sp
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
                         text = "Ví dụ:\n• Tìm \"chuyến bay\" hoặc \"flight\" để tìm vé máy bay, thẻ lên tàu bay.\n• Tìm \"ăn tối\" hoặc \"hóa đơn\" để tìm bill quán ăn, biên lai.\n• Tìm \"việc cần làm\" để tìm danh sách checklist công việc.",
                         fontSize = 12.sp,
-                        color = Color(0xFF64748B),
+                        color = AppColors.WarmTaupeText,
                         lineHeight = 16.sp
                     )
                 }
@@ -866,14 +845,14 @@ fun PhotoGalleryScreen(
                         }
                         showSemanticSearchDialog = false
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7E22CE))
+                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.ForestTeal)
                 ) {
                     Text(if (com.example.test2.BuildConfig.DEBUG) "Thử chế độ Pro (Debug)" else "Nâng cấp Pro")
                 }
             },
             dismissButton = {
                 OutlinedButton(onClick = { showSemanticSearchDialog = false }) {
-                    Text("Đóng")
+                    Text("Đóng", color = AppColors.WarmTaupeText)
                 }
             }
         )
@@ -887,9 +866,9 @@ fun DisplayModeSelector(
 ) {
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(Color(0xFFF1F5F9))
-            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(12.dp))
+            .background(AppColors.WarmSandSoft)
+            .border(1.dp, AppColors.BorderSand, RoundedCornerShape(12.dp))
             .padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -925,10 +904,10 @@ private fun DisplayModeButton(
     Box(
         modifier = Modifier
             .size(30.dp)
-            .clip(RoundedCornerShape(7.dp))
-            .background(if (isSelected) Color.White else Color.Transparent)
+            .clip(RoundedCornerShape(9.dp))
+            .background(if (isSelected) AppColors.SurfaceAlabaster else Color.Transparent)
             .then(
-                if (isSelected) Modifier.border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(7.dp))
+                if (isSelected) Modifier.border(1.dp, AppColors.BorderSand, RoundedCornerShape(9.dp))
                 else Modifier
             )
             .clickable(onClick = onClick),
@@ -937,7 +916,7 @@ private fun DisplayModeButton(
         Icon(
             imageVector = icon,
             contentDescription = title,
-            tint = if (isSelected) Color(0xFF2563EB) else Color(0xFF64748B),
+            tint = if (isSelected) AppColors.ForestTeal else AppColors.WarmTaupeText,
             modifier = Modifier.size(17.dp)
         )
     }
@@ -953,12 +932,12 @@ fun ActionCardTabPill(
 ) {
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(if (isActive) color else color.copy(alpha = 0.10f))
+            .clip(RoundedCornerShape(99.dp))
+            .background(if (isActive) color else AppColors.SurfaceAlabaster)
             .border(
                 width = 1.dp,
-                color = if (isActive) color else color.copy(alpha = 0.25f),
-                shape = RoundedCornerShape(20.dp)
+                color = if (isActive) color else AppColors.BorderSand,
+                shape = RoundedCornerShape(99.dp)
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 7.dp)
@@ -971,20 +950,20 @@ fun ActionCardTabPill(
                 text = label,
                 fontSize = 12.5.sp,
                 fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
-                color = if (isActive) Color.White else Color(0xFF1E293B)
+                color = if (isActive) AppColors.SurfaceAlabaster else AppColors.DeepPineText
             )
             if (badgeCount > 0) {
                 Box(
                     modifier = Modifier
                         .clip(CircleShape)
-                        .background(if (isActive) Color.White.copy(alpha = 0.25f) else color.copy(alpha = 0.20f))
+                        .background(if (isActive) AppColors.SurfaceAlabaster.copy(alpha = 0.25f) else AppColors.WarmSand)
                         .padding(horizontal = 6.dp, vertical = 1.dp)
                 ) {
                     Text(
                         text = "$badgeCount",
                         fontSize = 10.5.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (isActive) Color.White else color
+                        color = if (isActive) AppColors.SurfaceAlabaster else AppColors.WarmTaupeText
                     )
                 }
             }
@@ -1002,12 +981,12 @@ fun CategoryPill(
     val pillColor = parseHexColor(colorHex)
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(if (isActive) Color(0xFF2563EB) else Color.White)
+            .clip(RoundedCornerShape(99.dp))
+            .background(if (isActive) AppColors.ForestTeal else AppColors.SurfaceAlabaster)
             .border(
                 1.dp,
-                if (isActive) Color(0xFF2563EB) else Color(0xFFE2E8F0),
-                RoundedCornerShape(20.dp)
+                if (isActive) AppColors.ForestTeal else AppColors.BorderSand,
+                RoundedCornerShape(99.dp)
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 7.dp)
@@ -1020,13 +999,13 @@ fun CategoryPill(
                 modifier = Modifier
                     .size(8.dp)
                     .clip(CircleShape)
-                    .background(if (isActive) Color.White else pillColor)
+                    .background(if (isActive) AppColors.SurfaceAlabaster else pillColor)
             )
             Text(
                 text = name,
                 fontSize = 12.5.sp,
                 fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
-                color = if (isActive) Color.White else Color(0xFF334155)
+                color = if (isActive) AppColors.SurfaceAlabaster else AppColors.DeepPineText
             )
         }
     }
@@ -1050,12 +1029,12 @@ fun PhotoBigPreviewCard(
     }
 
     Card(
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = AppColors.SurfaceAlabaster),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(12.dp))
+            .border(1.dp, AppColors.BorderSand, RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
     ) {
         Column {
@@ -1063,7 +1042,7 @@ fun PhotoBigPreviewCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
-                    .background(Color(0xFFE2E8F0))
+                    .background(AppColors.WarmSand)
             ) {
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
@@ -1075,64 +1054,60 @@ fun PhotoBigPreviewCard(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // Semantic Match Badge in Top-Left (Pro Vector Search)
                 if (semanticScore != null && semanticScore >= 0.28f) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(6.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color(0xFF7E22CE).copy(alpha = 0.9f))
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(AppColors.PlumMuted.copy(alpha = 0.92f))
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
                             text = "✨ Khớp ${(semanticScore * 100).toInt()}%",
                             fontSize = 9.5.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = AppColors.SurfaceAlabaster
                         )
                     }
                 }
 
-                // Privacy Vault Shield Badge
                 if (photo.filePath.endsWith(".enc")) {
                     Box(
                         modifier = Modifier
                             .align(if (semanticScore != null && semanticScore >= 0.28f) Alignment.BottomStart else Alignment.TopStart)
                             .padding(6.dp)
                             .clip(CircleShape)
-                            .background(Color(0xCC0F172A))
+                            .background(AppColors.ForestTealDark.copy(alpha = 0.88f))
                             .padding(4.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Shield,
                             contentDescription = "Đã mã hóa trong Két",
-                            tint = Color(0xFF22C55E),
+                            tint = AppColors.SageOliveLight,
                             modifier = Modifier.size(13.dp)
                         )
                     }
                 }
 
-                // Favorite Heart Overlay in Top-Right
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(6.dp)
                         .size(28.dp)
                         .clip(CircleShape)
-                        .background(if (photo.isFavorite) Color.White else Color.Black.copy(alpha = 0.45f))
+                        .background(if (photo.isFavorite) AppColors.SurfaceAlabaster else AppColors.DeepPineText.copy(alpha = 0.45f))
                         .clickable { onToggleFavorite() },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = if (photo.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                         contentDescription = "Yêu thích",
-                        tint = if (photo.isFavorite) Color(0xFFEF4444) else Color.White,
+                        tint = if (photo.isFavorite) AppColors.TerracottaAlert else Color.White,
                         modifier = Modifier.size(16.dp)
                     )
                 }
 
-                // Category Badges Overlay in Bottom-Left
                 if (photoCategories.isNotEmpty()) {
                     Row(
                         modifier = Modifier
@@ -1145,8 +1120,8 @@ fun PhotoBigPreviewCard(
                             val catColor = parseHexColor(cat.colorHex)
                             Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(Color.Black.copy(alpha = 0.65f))
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(AppColors.DeepPineText.copy(alpha = 0.72f))
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1161,7 +1136,7 @@ fun PhotoBigPreviewCard(
                                         text = cat.name,
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Medium,
-                                        color = Color.White,
+                                        color = AppColors.SurfaceAlabaster,
                                         maxLines = 1
                                     )
                                 }
@@ -1171,50 +1146,28 @@ fun PhotoBigPreviewCard(
                 }
             }
 
-            // Info below image (2 columns)
-            Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
+            // Minimal metadata below image (date & schedule indicator only — no title/OCR clutter)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
-                    text = photo.title,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    text = formatDate(photo.dateAdded),
+                    fontSize = 11.sp,
+                    color = AppColors.WarmTaupeText
                 )
-                Spacer(modifier = Modifier.height(2.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = formatDate(photo.dateAdded),
-                        fontSize = 11.sp,
-                        color = Color(0xFF64748B)
-                    )
-                    val isShopping = photo.detectedIntent == "SHOPPING" || photo.categoryIds.contains(DefaultCategories.TO_BUY)
-                    val isEvent = photo.detectedIntent == "EVENT" || photo.categoryIds.contains(DefaultCategories.EVENTS) || photo.suggestedEventDateMillis != null
-                    val hasSchedule = isShopping || isEvent
-                    if (hasSchedule) {
-                        Icon(
-                            Icons.Default.CalendarMonth,
-                            contentDescription = if (isShopping) "Lên lịch mua" else "Lên lịch hẹn",
-                            tint = if (isShopping) Color(0xFFF59E0B) else Color(0xFF2563EB),
-                            modifier = Modifier.size(13.dp)
-                        )
-                    }
-                }
-
-                // OCR Preview if extracted
-                val ocrSnippet = photo.piiScrubbedText
-                if (!ocrSnippet.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(3.dp))
-                    Text(
-                        text = ocrSnippet.take(45),
-                        fontSize = 10.sp,
-                        color = Color(0xFF64748B),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                val isShopping = photo.detectedIntent == "SHOPPING" || photo.categoryIds.contains(DefaultCategories.TO_BUY)
+                val isEvent = photo.detectedIntent == "EVENT" || photo.categoryIds.contains(DefaultCategories.EVENTS) || photo.suggestedEventDateMillis != null
+                val hasSchedule = isShopping || isEvent
+                if (hasSchedule) {
+                    Icon(
+                        Icons.Default.CalendarMonth,
+                        contentDescription = if (isShopping) "Lên lịch mua" else "Lên lịch hẹn",
+                        tint = if (isShopping) AppColors.OchreGold else AppColors.ForestTeal,
+                        modifier = Modifier.size(13.dp)
                     )
                 }
             }
@@ -1240,12 +1193,12 @@ fun PhotoSmallPreviewCard(
     }
 
     Card(
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = AppColors.SurfaceAlabaster),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(8.dp))
+            .border(1.dp, AppColors.BorderSand, RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
     ) {
         Column {
@@ -1253,7 +1206,7 @@ fun PhotoSmallPreviewCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
-                    .background(Color(0xFFE2E8F0))
+                    .background(AppColors.WarmSand)
             ) {
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
@@ -1265,45 +1218,42 @@ fun PhotoSmallPreviewCard(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // Semantic Match Indicator in Top-Left (Pro Vector Search)
                 if (semanticScore != null && semanticScore >= 0.28f) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(3.dp)
                             .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0xFF7E22CE).copy(alpha = 0.9f))
+                            .background(AppColors.PlumMuted.copy(alpha = 0.92f))
                             .padding(horizontal = 3.dp, vertical = 1.dp)
                     ) {
                         Text(
                             text = "${(semanticScore * 100).toInt()}%",
                             fontSize = 8.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = AppColors.SurfaceAlabaster
                         )
                     }
                 }
 
-                // Privacy Vault Shield Badge
                 if (photo.filePath.endsWith(".enc")) {
                     Box(
                         modifier = Modifier
                             .align(if (semanticScore != null && semanticScore >= 0.28f) Alignment.BottomStart else Alignment.TopStart)
                             .padding(3.dp)
                             .clip(CircleShape)
-                            .background(Color(0xCC0F172A))
+                            .background(AppColors.ForestTealDark.copy(alpha = 0.88f))
                             .padding(2.5.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Shield,
                             contentDescription = "Đã mã hóa trong Két",
-                            tint = Color(0xFF22C55E),
+                            tint = AppColors.SageOliveLight,
                             modifier = Modifier.size(10.dp)
                         )
                     }
                 }
 
-                // Favorite Heart Overlay in Top-Right
                 if (photo.isFavorite) {
                     Box(
                         modifier = Modifier
@@ -1311,27 +1261,26 @@ fun PhotoSmallPreviewCard(
                             .padding(3.dp)
                             .size(18.dp)
                             .clip(CircleShape)
-                            .background(Color.White)
+                            .background(AppColors.SurfaceAlabaster)
                             .clickable { onToggleFavorite() },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.Favorite,
                             contentDescription = "Yêu thích",
-                            tint = Color(0xFFEF4444),
+                            tint = AppColors.TerracottaAlert,
                             modifier = Modifier.size(11.dp)
                         )
                     }
                 }
 
-                // Category dots in Bottom-Left
                 if (photoCategories.isNotEmpty()) {
                     Row(
                         modifier = Modifier
                             .align(Alignment.BottomStart)
                             .padding(3.dp)
                             .clip(RoundedCornerShape(4.dp))
-                            .background(Color.Black.copy(alpha = 0.5f))
+                            .background(AppColors.DeepPineText.copy(alpha = 0.55f))
                             .padding(horizontal = 3.dp, vertical = 1.dp),
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -1347,18 +1296,6 @@ fun PhotoSmallPreviewCard(
                     }
                 }
             }
-
-            // Minimal title below
-            Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 3.dp)) {
-                Text(
-                    text = photo.title,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color(0xFF0F172A),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
         }
     }
 }
@@ -1368,6 +1305,7 @@ fun PhotoListRowCard(
     photo: Photo,
     categories: List<Category>,
     semanticScore: Float? = null,
+    showTitle: Boolean = true,
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit
 ) {
@@ -1381,12 +1319,12 @@ fun PhotoListRowCard(
     }
 
     Card(
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = AppColors.SurfaceAlabaster),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(12.dp))
+            .border(1.dp, AppColors.BorderSand, RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
     ) {
         Row(
@@ -1395,12 +1333,11 @@ fun PhotoListRowCard(
                 .padding(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Thumbnail on left
             Box(
                 modifier = Modifier
-                    .size(68.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFFE2E8F0))
+                    .size(66.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(AppColors.WarmSand)
             ) {
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
@@ -1418,32 +1355,31 @@ fun PhotoListRowCard(
                             .align(Alignment.TopStart)
                             .padding(3.dp)
                             .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0xFF7E22CE).copy(alpha = 0.9f))
+                            .background(AppColors.PlumMuted.copy(alpha = 0.92f))
                             .padding(horizontal = 4.dp, vertical = 1.dp)
                     ) {
                         Text(
                             text = "${(semanticScore * 100).toInt()}%",
                             fontSize = 8.5.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = AppColors.SurfaceAlabaster
                         )
                     }
                 }
 
-                // Privacy Vault Shield Badge
                 if (photo.filePath.endsWith(".enc")) {
                     Box(
                         modifier = Modifier
                             .align(if (semanticScore != null && semanticScore >= 0.28f) Alignment.BottomStart else Alignment.TopStart)
                             .padding(3.dp)
                             .clip(CircleShape)
-                            .background(Color(0xCC0F172A))
+                            .background(AppColors.ForestTealDark.copy(alpha = 0.88f))
                             .padding(2.5.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Shield,
                             contentDescription = "Đã mã hóa trong Két",
-                            tint = Color(0xFF22C55E),
+                            tint = AppColors.SageOliveLight,
                             modifier = Modifier.size(11.dp)
                         )
                     }
@@ -1452,26 +1388,27 @@ fun PhotoListRowCard(
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            // Center Column with Title, Date, Size, Category badges
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = photo.title,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(2.dp))
+                if (showTitle) {
+                    Text(
+                        text = photo.title,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AppColors.DeepPineText,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                }
                 val sizeStr = formatFileSize(photo.fileSizeBytes)
                 val dateStr = formatDate(photo.dateAdded)
                 Text(
                     text = if (sizeStr.isNotBlank()) "$dateStr • $sizeStr" else dateStr,
-                    fontSize = 11.5.sp,
-                    color = Color(0xFF64748B)
+                    fontSize = if (showTitle) 11.5.sp else 13.sp,
+                    fontWeight = if (showTitle) FontWeight.Normal else FontWeight.SemiBold,
+                    color = if (showTitle) AppColors.WarmTaupeText else AppColors.DeepPineText
                 )
 
-                // Category badges & Semantic Match pill
                 if (photoCategories.isNotEmpty() || photo.suggestedEventDateMillis != null || (semanticScore != null && semanticScore >= 0.28f)) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Row(
@@ -1482,15 +1419,15 @@ fun PhotoListRowCard(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(Color(0xFFF3E8FF))
-                                    .border(1.dp, Color(0xFFD8B4FE), RoundedCornerShape(6.dp))
+                                    .background(AppColors.PlumMutedLight)
+                                    .border(1.dp, AppColors.PlumMuted.copy(alpha = 0.25f), RoundedCornerShape(6.dp))
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
                                     text = "✨ Khớp ${(semanticScore * 100).toInt()}%",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF7E22CE)
+                                    color = AppColors.PlumMuted
                                 )
                             }
                         }
@@ -1500,7 +1437,7 @@ fun PhotoListRowCard(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(catColor.copy(alpha = 0.12f))
+                                    .background(catColor.copy(alpha = 0.14f))
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
@@ -1519,14 +1456,14 @@ fun PhotoListRowCard(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(if (isShopping) Color(0xFFFEF3C7) else Color(0xFFEFF6FF))
+                                    .background(if (isShopping) AppColors.OchreGoldLight else AppColors.ForestTealSoft)
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
                                     text = if (isShopping) "Lên lịch mua" else "Sự kiện",
                                     fontSize = 10.5.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (isShopping) Color(0xFFD97706) else Color(0xFF2563EB)
+                                    color = if (isShopping) AppColors.OchreGoldDark else AppColors.ForestTeal
                                 )
                             }
                         }
@@ -1534,7 +1471,6 @@ fun PhotoListRowCard(
                 }
             }
 
-            // Favorite Button on Right
             IconButton(
                 onClick = onToggleFavorite,
                 modifier = Modifier.size(38.dp)
@@ -1542,11 +1478,10 @@ fun PhotoListRowCard(
                 Icon(
                     imageVector = if (photo.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                     contentDescription = "Yêu thích",
-                    tint = if (photo.isFavorite) Color(0xFFEF4444) else Color(0xFF94A3B8),
+                    tint = if (photo.isFavorite) AppColors.TerracottaAlert else AppColors.WarmMutedText,
                     modifier = Modifier.size(20.dp)
                 )
             }
         }
     }
 }
-

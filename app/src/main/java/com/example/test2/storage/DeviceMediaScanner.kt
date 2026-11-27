@@ -6,7 +6,7 @@ import android.os.Build
 import android.provider.MediaStore
 import com.example.test2.shared.models.Folder
 import com.example.test2.shared.models.Photo
-import com.example.test2.shared.repository.PhotoRepository
+import com.example.test2.shared.models.PhotoComparators
 import com.example.test2.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -162,7 +162,7 @@ class DeviceMediaScanner(private val context: Context) {
         }
 
         DeviceScanResult(
-            photos = photos.sortedWith(PhotoRepository.chronologicalDescComparator),
+            photos = photos.sortedWith(PhotoComparators.chronologicalDescComparator),
             folders = folders,
             physicalPaths = physicalPaths
         )

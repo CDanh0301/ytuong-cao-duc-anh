@@ -2,9 +2,16 @@ package com.example.test2.presentation.vault
 
 import com.example.test2.ui.RestoreProgress
 
+sealed interface VaultUiEvent {
+    data object RequestBiometricUnlock : VaultUiEvent
+    data object OpenAllFilesSettings : VaultUiEvent
+    data object OpenDeviceLockSettings : VaultUiEvent
+}
+
 data class VaultUiState(
     val isVaultEnabled: Boolean = false,
     val isAppUnlocked: Boolean = true,
+    val protectedPhotoCount: Int = 0,
     val showPrivacyConsentDialog: Boolean = false,
     val showAllFilesAccessDialog: Boolean = false,
     val showEnableVaultScopeDialog: Boolean = false,

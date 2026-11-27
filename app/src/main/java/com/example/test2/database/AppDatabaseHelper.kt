@@ -3,8 +3,6 @@ package com.example.test2.database
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
-import android.util.Log
-import com.example.test2.BuildConfig
 import com.example.test2.data.local.dao.ActionCardDao
 import com.example.test2.data.local.dao.ActionCardDaoImpl
 import com.example.test2.data.local.dao.FtsSearchDao
@@ -15,6 +13,7 @@ import com.example.test2.data.local.dao.VectorDao
 import com.example.test2.data.local.dao.VectorDaoImpl
 import com.example.test2.shared.models.ActionCard
 import com.example.test2.shared.models.ActionCardType
+import com.example.test2.util.AppLogger
 
 data class ScreenshotQueueItem(
     val id: Long,
@@ -37,7 +36,8 @@ data class ScreenshotQueueItem(
     val modelVersion: String? = null,
     val isLiveCapture: Boolean = false,
     val photoTitle: String? = null,
-    val originalFileName: String? = null
+    val originalFileName: String? = null,
+    val isUserCategorized: Boolean = false
 )
 
 data class ProcessedScreenshotRecord(
@@ -53,10 +53,11 @@ data class ProcessedScreenshotRecord(
     val tags: String? = null,
     val entities: String? = null,
     val itemsToBuy: String? = null,
-    val status: String = "COMPLETED",
+    val status: String = QueueStatus.COMPLETED.name,
     val dateAdded: Long = 0L,
     val photoTitle: String? = null,
-    val originalFileName: String? = null
+    val originalFileName: String? = null,
+    val isUserCategorized: Boolean = false
 )
 
 data class QueueStateUpdate(
@@ -74,7 +75,8 @@ data class QueueStateUpdate(
     val itemsToBuy: String? = null,
     val needsCloudUpgrade: Boolean = false,
     val modelName: String? = null,
-    val modelVersion: String? = null
+    val modelVersion: String? = null,
+    val forceCategoryUpdate: Boolean = false
 )
 
 internal fun android.database.Cursor.toProcessedScreenshotRecord(): ProcessedScreenshotRecord {
@@ -85,6 +87,10 @@ internal fun android.database.Cursor.toProcessedScreenshotRecord(): ProcessedScr
     fun optLong(colName: String, defaultVal: Long): Long {
         val idx = getColumnIndex(colName)
         return if (idx in 0 until columnCount && !isNull(idx)) getLong(idx) else defaultVal
+    }
+    fun optBool(colName: String): Boolean {
+        val idx = getColumnIndex(colName)
+        return idx in 0 until columnCount && !isNull(idx) && getInt(idx) == 1
     }
     return ProcessedScreenshotRecord(
         photoId = getString(0),
@@ -99,10 +105,11 @@ internal fun android.database.Cursor.toProcessedScreenshotRecord(): ProcessedScr
         tags = optStr("tags", 9),
         entities = optStr("entities", 10),
         itemsToBuy = optStr("items_to_buy", 11),
-        status = optStr("status", 12) ?: "COMPLETED",
+        status = optStr("status", 12) ?: QueueStatus.COMPLETED.name,
         dateAdded = optLong("date_added", 0L),
         photoTitle = optStr("photo_title", -1),
-        originalFileName = optStr("original_file_name", -1)
+        originalFileName = optStr("original_file_name", -1),
+        isUserCategorized = optBool("is_user_categorized")
     )
 }
 
@@ -119,7 +126,8 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
         // 8: Added TABLE_ACTION_CARDS
         // 9: Added semantic_tags column to TABLE_QUEUE
         // 10: Enforced idempotent Action Cards table creation & schema migration
-        const val DATABASE_VERSION = 10
+        // 11: Added is_user_categorized column to TABLE_QUEUE to protect user-assigned categories
+        const val DATABASE_VERSION = 11
 
         private const val TABLE_QUEUE = ScreenshotQueueDaoImpl.TABLE_QUEUE
         private const val TABLE_FTS = FtsSearchDaoImpl.TABLE_FTS
@@ -138,12 +146,10 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
     }
 
     private fun logDebugError(message: String, error: Throwable) {
-        if (BuildConfig.DEBUG) {
-            Log.e("AppDatabaseHelper", message, error)
-        }
+        AppLogger.e("AppDatabaseHelper", message, error)
     }
 
-    private val ftsDaoImpl by lazy { FtsSearchDaoImpl(this) }
+    private val ftsDaoImpl by lazy { FtsSearchDaoImpl(this, ::logDebugError) }
     private val vectorDaoImpl by lazy { VectorDaoImpl(this, ::logDebugError) }
     private val actionCardDaoImpl by lazy { ActionCardDaoImpl(this, ::logDebugError) }
     private val queueDaoImpl by lazy {
@@ -154,7 +160,8 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
         super.onConfigure(db)
         try {
             db.enableWriteAheadLogging()
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.w("AppDatabaseHelper", "Failed to enable WAL", e)
         }
     }
 
@@ -188,6 +195,7 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
                 is_live_capture INTEGER NOT NULL DEFAULT 0,
                 photo_title TEXT,
                 original_file_name TEXT,
+                is_user_categorized INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
@@ -375,6 +383,12 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
             } catch (_: Exception) {
             }
         }
+        if (oldVersion < 11) {
+            try {
+                db.execSQL("ALTER TABLE $TABLE_QUEUE ADD COLUMN is_user_categorized INTEGER NOT NULL DEFAULT 0;")
+            } catch (_: Exception) {
+            }
+        }
     }
 
     // --- Delegated DAO Operations ---
@@ -461,11 +475,22 @@ class AppDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_N
         entities: String?,
         itemsToBuy: String?,
         photoTitle: String?,
-        originalFileName: String?
+        originalFileName: String?,
+        forceCategoryUpdate: Boolean
     ) = queueDaoImpl.recordProcessedScreenshot(
         photoId, filePath, dateAdded, scrubbedText, detectedIntent, eventTitle, eventDateMillis,
-        targetCategoryId, status, eventDescription, summary, tags, entities, itemsToBuy, photoTitle, originalFileName
+        targetCategoryId, status, eventDescription, summary, tags, entities, itemsToBuy,
+        photoTitle, originalFileName, forceCategoryUpdate
     )
+
+    override fun updatePhotosCategoryInQueue(
+        photoIds: Collection<String>,
+        targetCategoryId: String?,
+        lockCategory: Boolean
+    ) = queueDaoImpl.updatePhotosCategoryInQueue(photoIds, targetCategoryId, lockCategory)
+
+    override fun clearCategoryInQueue(categoryId: String) =
+        queueDaoImpl.clearCategoryInQueue(categoryId)
 
     override fun getProcessedScreenshot(photoId: String): ProcessedScreenshotRecord? =
         queueDaoImpl.getProcessedScreenshot(photoId)

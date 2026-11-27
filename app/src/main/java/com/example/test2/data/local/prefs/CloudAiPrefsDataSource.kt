@@ -2,11 +2,31 @@ package com.example.test2.data.local.prefs
 
 import android.content.Context
 import android.content.SharedPreferences
-import com.example.test2.ai.CloudAiConfig
-import com.example.test2.ai.CloudAiConfigManager
+import com.example.test2.BuildConfig
+
+data class CloudAiConfig(
+    val apiKey: String,
+    val modelName: String,
+    val customEndpoint: String,
+    val isEnabled: Boolean,
+    val proxyBaseUrl: String = CloudAiDefaults.PROXY_BASE_URL
+) {
+    fun isCloudReady(): Boolean = isEnabled &&
+        (proxyBaseUrl.isNotBlank() || customEndpoint.isNotBlank() || apiKey.isNotBlank())
+}
+
+object CloudAiDefaults {
+    val PROXY_BASE_URL: String
+        get() = BuildConfig.CLOUD_AI_PROXY_URL.trim()
+    const val HARDCODED_MODEL_NAME = "gemini-3.5-flash-lite"
+    const val DEFAULT_MODEL = "gemini-3.5-flash-lite"
+    const val DEFAULT_EMBEDDING_MODEL = "gemini-embedding-2"
+    val AVAILABLE_MODELS = listOf("gemini-3.5-flash-lite", "gemini-3.6-flash")
+}
 
 /**
- * Local SharedPreferences data source for Cloud AI (Gemini) configuration.
+ * Local SharedPreferences data source for Cloud AI (Proxy / Gemini) configuration.
+ * Never embeds hardcoded API keys in client source code.
  */
 class CloudAiPrefsDataSource(context: Context) {
 
@@ -14,34 +34,40 @@ class CloudAiPrefsDataSource(context: Context) {
         context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     fun getConfig(): CloudAiConfig {
-        val hardcodedKey = CloudAiConfigManager.HARDCODED_API_KEY
-        val hardcodedModel = CloudAiConfigManager.HARDCODED_MODEL_NAME
-        val apiKey = if (hardcodedKey.isNotBlank()) hardcodedKey.trim() else (prefs.getString(KEY_API_KEY, "") ?: "")
-        val rawModel = if (hardcodedModel.isNotBlank()) hardcodedModel.trim() else (prefs.getString(KEY_MODEL_NAME, CloudAiConfigManager.DEFAULT_MODEL) ?: CloudAiConfigManager.DEFAULT_MODEL)
-        var modelName = rawModel.ifBlank { CloudAiConfigManager.DEFAULT_MODEL }
+        val proxyBaseUrl = CloudAiDefaults.PROXY_BASE_URL
+        val hardcodedModel = CloudAiDefaults.HARDCODED_MODEL_NAME
+        val apiKey = prefs.getString(KEY_API_KEY, "") ?: ""
+        val rawModel = if (hardcodedModel.isNotBlank()) {
+            hardcodedModel.trim()
+        } else {
+            prefs.getString(KEY_MODEL_NAME, CloudAiDefaults.DEFAULT_MODEL) ?: CloudAiDefaults.DEFAULT_MODEL
+        }
+        var modelName = rawModel.ifBlank { CloudAiDefaults.DEFAULT_MODEL }
         if (modelName.contains("1.5") || modelName.contains("2.0") || modelName.contains("2.5")) {
-            modelName = CloudAiConfigManager.DEFAULT_MODEL
+            modelName = CloudAiDefaults.DEFAULT_MODEL
         }
         val customEndpoint = prefs.getString(KEY_CUSTOM_ENDPOINT, "") ?: ""
-        val isEnabled = if (hardcodedKey.isNotBlank()) true else prefs.getBoolean(KEY_ENABLED, apiKey.isNotBlank())
+        val isEnabled = if (proxyBaseUrl.isNotBlank()) {
+            true
+        } else {
+            prefs.getBoolean(KEY_ENABLED, apiKey.isNotBlank() || customEndpoint.isNotBlank())
+        }
         return CloudAiConfig(
             apiKey = apiKey,
             modelName = modelName,
             customEndpoint = customEndpoint,
-            isEnabled = isEnabled
+            isEnabled = isEnabled,
+            proxyBaseUrl = proxyBaseUrl
         )
     }
 
-    fun getApiKey(): String {
-        if (CloudAiConfigManager.HARDCODED_API_KEY.isNotBlank()) {
-            return CloudAiConfigManager.HARDCODED_API_KEY.trim()
-        }
-        return getConfig().apiKey
-    }
+    fun getApiKey(): String = getConfig().apiKey
+
+    fun getProxyBaseUrl(): String = getConfig().proxyBaseUrl
 
     fun saveConfig(
         apiKey: String,
-        modelName: String = CloudAiConfigManager.DEFAULT_MODEL,
+        modelName: String = CloudAiDefaults.DEFAULT_MODEL,
         customEndpoint: String = "",
         isEnabled: Boolean = true
     ) {
@@ -54,11 +80,7 @@ class CloudAiPrefsDataSource(context: Context) {
         }
     }
 
-    fun isConfigured(): Boolean {
-        if (CloudAiConfigManager.HARDCODED_API_KEY.isNotBlank()) return true
-        val config = getConfig()
-        return config.isEnabled && (config.apiKey.isNotBlank() || config.customEndpoint.isNotBlank())
-    }
+    fun isConfigured(): Boolean = getConfig().isCloudReady()
 
     companion object {
         private const val PREFS_NAME = "cloud_ai_settings"

@@ -5,11 +5,19 @@
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- Exclude encrypted photos vault directory from cloud backup -->
+        <!-- Exclude all sensitive local files, SQLite databases, and SharedPreferences from cloud backup -->
         <exclude domain="file" path="photos"/>
+        <exclude domain="file" path="photo_manager_metadata.json.enc"/>
+        <exclude domain="file" path="photo_manager_metadata.json"/>
+        <exclude domain="database" path="."/>
+        <exclude domain="sharedpref" path="."/>
     </cloud-backup>
     <device-transfer>
-        <!-- Exclude encrypted photos vault directory from D2D transfer as Keystore keys are hardware-bound -->
+        <!-- Exclude all sensitive local files, SQLite databases, and SharedPreferences from D2D transfer -->
         <exclude domain="file" path="photos"/>
+        <exclude domain="file" path="photo_manager_metadata.json.enc"/>
+        <exclude domain="file" path="photo_manager_metadata.json"/>
+        <exclude domain="database" path="."/>
+        <exclude domain="sharedpref" path="."/>
     </device-transfer>
 </data-extraction-rules>

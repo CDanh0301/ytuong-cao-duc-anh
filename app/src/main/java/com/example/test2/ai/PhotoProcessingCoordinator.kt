@@ -6,12 +6,15 @@ import com.example.test2.data.local.dao.ActionCardDao
 import com.example.test2.data.local.dao.FtsSearchDao
 import com.example.test2.data.local.dao.ScreenshotQueueDao
 import com.example.test2.data.local.dao.VectorDao
+import com.example.test2.data.local.prefs.CloudAiPrefsDataSource
+import com.example.test2.data.remote.GeminiApiService
+import com.example.test2.data.remote.GeminiApiServiceImpl
 import com.example.test2.database.AppDatabaseHelper
-import com.example.test2.database.DefaultCategories
+import com.example.test2.shared.models.DefaultCategories
 import com.example.test2.database.ProcessedScreenshotRecord
 import com.example.test2.database.QueueStatus
 import com.example.test2.shared.models.Photo
-import com.example.test2.shared.repository.PhotoRepository
+import com.example.test2.shared.repository.IPhotoRepository
 import com.example.test2.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -23,15 +26,18 @@ import kotlinx.coroutines.withContext
  */
 class PhotoProcessingCoordinator(
     private val context: Context,
-    private val repository: PhotoRepository,
+    private val repository: IPhotoRepository,
     private val queueDao: ScreenshotQueueDao,
     private val ftsDao: FtsSearchDao,
     private val vectorDao: VectorDao,
-    private val actionCardDao: ActionCardDao
+    private val actionCardDao: ActionCardDao,
+    private val geminiApiService: GeminiApiService = GeminiApiServiceImpl(context),
+    private val cloudAiPrefs: CloudAiPrefsDataSource = CloudAiPrefsDataSource(context)
 ) {
+    @Deprecated("Use constructor with DAO interfaces and GeminiApiService")
     constructor(
         context: Context,
-        repository: PhotoRepository,
+        repository: IPhotoRepository,
         dbHelper: AppDatabaseHelper
     ) : this(context, repository, dbHelper, dbHelper, dbHelper, dbHelper)
 
@@ -120,9 +126,11 @@ class PhotoProcessingCoordinator(
 
         // Short-Circuit Optimization: Pure Nature, Landscape, Scenery & Animal photos without text
         if ((visualAnalysis.isNature || visualAnalysis.isAnimal) && !visualAnalysis.hasTextOrDoc) {
-            val targetCatId = DefaultCategories.NATURE
+            val isCategoryLocked = photo.isCategoryUserModified || targetCategoryIds.isNotEmpty()
+            val targetCatId = if (isCategoryLocked) null else DefaultCategories.NATURE
+            val effectiveCatIds = if (isCategoryLocked) (targetCategoryIds.ifEmpty { photo.categoryIds }) else setOf(DefaultCategories.NATURE)
             val categoryNames = repository.categories.value
-                .filter { it.id == targetCatId }
+                .filter { it.id in effectiveCatIds }
                 .joinToString(" ") { it.name }
 
             val semanticTags = visualAnalysis.vietnameseSemanticTags.ifEmpty {
@@ -187,9 +195,11 @@ class PhotoProcessingCoordinator(
                 hasFace = hasFace,
                 visualLabels = visualAnalysis.rawLabels
             )
-            val targetCatId = heuristic.targetCategoryId
+            val isCategoryLocked = photo.isCategoryUserModified || targetCategoryIds.isNotEmpty()
+            val targetCatId = if (isCategoryLocked) null else heuristic.targetCategoryId
+            val effectiveCatIds = if (isCategoryLocked) (targetCategoryIds.ifEmpty { photo.categoryIds }) else setOfNotNull(heuristic.targetCategoryId)
             val categoryNames = repository.categories.value
-                .filter { it.id == targetCatId }
+                .filter { it.id in effectiveCatIds }
                 .joinToString(" ") { it.name }
 
             val semanticTags = heuristic.semanticTags.ifEmpty { visualAnalysis.vietnameseSemanticTags }
@@ -276,9 +286,11 @@ class PhotoProcessingCoordinator(
             hasFace = hasFace,
             visualLabels = visualAnalysis.rawLabels
         )
-        val targetCatId = heuristic.targetCategoryId
+        val isCategoryLocked = photo.isCategoryUserModified || targetCategoryIds.isNotEmpty()
+        val targetCatId = if (isCategoryLocked) null else heuristic.targetCategoryId
+        val effectiveCatIds = if (isCategoryLocked) (targetCategoryIds.ifEmpty { photo.categoryIds }) else setOfNotNull(heuristic.targetCategoryId)
         val categoryNames = repository.categories.value
-            .filter { it.id == targetCatId }
+            .filter { it.id in effectiveCatIds }
             .joinToString(" ") { it.name }
 
         val semanticTags = (heuristic.semanticTags + visualAnalysis.vietnameseSemanticTags).distinct()
@@ -356,7 +368,9 @@ class PhotoProcessingCoordinator(
         } else {
             MlKitOcrEngine.recognizeText(context, photo.filePath)
         }
-        val piiResult = onDeviceResult?.let { PiiScrubResult(it.scrubbedText, false) } ?: PiiScrubber.scrub(ocrText)
+        val piiResult = onDeviceResult?.let {
+            PiiScrubResult(it.scrubbedText, it.hasPiiRedacted)
+        } ?: PiiScrubber.scrub(ocrText)
 
         // Save cards immediately on device if available
         if (QualityFlags.INSTANT_EXTRACTION && onDeviceResult != null && onDeviceResult.cards.isNotEmpty()) {
@@ -379,8 +393,7 @@ class PhotoProcessingCoordinator(
                 visualLabels = visualAnalysis.rawLabels
             )
         } else {
-            CloudAiBackendClient.analyzeWithFallback(
-                context = context,
+            geminiApiService.analyzeWithFallback(
                 scrubbedText = piiResult.scrubbedText,
                 photoTitle = photo.title,
                 categories = repository.categories.value,
@@ -412,11 +425,11 @@ class PhotoProcessingCoordinator(
         )
         vectorDao.savePhotoVector(photo.id, embedding, parsed.detectedIntent)
 
-        // 768D Neural Vector (Pro tier with API Key, only for CLOUD_ELIGIBLE)
+        // 768D Neural Vector (Pro tier with Cloud configured, only for CLOUD_ELIGIBLE)
         if (privacyDecision == PrivacyDecision.CLOUD_ELIGIBLE && repository.accountTier.value.isPro && piiResult.scrubbedText.isNotBlank()) {
-            val apiKey = CloudAiConfigManager.getApiKey(context)
-            if (apiKey.isNotBlank()) {
-                val neuralVec = CloudAiBackendClient.getEmbedding(piiResult.scrubbedText, apiKey)
+            val aiConfig = cloudAiPrefs.getConfig()
+            if (aiConfig.isCloudReady()) {
+                val neuralVec = geminiApiService.getEmbedding(piiResult.scrubbedText, aiConfig.apiKey)
                 if (neuralVec != null) {
                     vectorDao.savePhotoNeuralVector(photo.id, neuralVec)
                 }
@@ -434,7 +447,8 @@ class PhotoProcessingCoordinator(
             eventTitle = parsed.suggestedEventTitle,
             eventDateMillis = parsed.suggestedEventDateMillis,
             targetCategoryId = parsed.targetCategoryId,
-            eventDescription = parsed.suggestedEventDescription
+            eventDescription = parsed.suggestedEventDescription,
+            forceCategoryUpdate = true
         )
 
         repository.updatePhotoAiMetadata(

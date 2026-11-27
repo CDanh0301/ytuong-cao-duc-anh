@@ -176,7 +176,7 @@ object ImageDecoder {
                 context.contentResolver.openInputStream(Uri.fromFile(file))
             }
         } catch (e: Exception) {
-            android.util.Log.e("ImageDecoder", "openStream failed for $path: ${e.message}")
+            AppLogger.e("ImageDecoder", "openStream failed for $path: ${e.message}", e)
             null
         }
     }

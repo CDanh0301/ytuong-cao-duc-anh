@@ -6,6 +6,8 @@ import android.app.job.JobScheduler
 import android.app.job.JobService
 import android.content.ComponentName
 import android.content.Context
+import android.os.Build
+import com.example.test2.util.AppLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -42,17 +44,13 @@ object AgingJobScheduler {
 
     fun schedule(context: Context) {
         try {
-            val jobScheduler = context.getSystemService(Context.JOB_SCHEDULER_SERVICE) as? JobScheduler ?: return
-            val componentName = ComponentName(context, AgingMonitorJobService::class.java)
-
-            // Periodic 24-hour interval; requires battery not low
-            val builder = JobInfo.Builder(JOB_ID, componentName)
-                .setPeriodic(24 * 60 * 60 * 1000L)
-                .setPersisted(true)
-                .setRequiresBatteryNotLow(true)
-
-            jobScheduler.schedule(builder.build())
-        } catch (_: Exception) {
+            // Cancel legacy raw JobScheduler job if any so daily WorkManager (KEEP) is the single source of truth
+            // and never resets the 24h countdown on repeated app launches.
+            val jobScheduler = context.getSystemService(Context.JOB_SCHEDULER_SERVICE) as? JobScheduler
+            jobScheduler?.cancel(JOB_ID)
+        } catch (e: Exception) {
+            AppLogger.w("AgingJobScheduler", "Failed cancelling legacy aging job", e)
         }
+        AgingMonitorWorker.enqueuePeriodic(context)
     }
 }

@@ -79,8 +79,17 @@ interface ScreenshotQueueDao {
         entities: String? = null,
         itemsToBuy: String? = null,
         photoTitle: String? = null,
-        originalFileName: String? = null
+        originalFileName: String? = null,
+        forceCategoryUpdate: Boolean = false
     )
+
+    fun updatePhotosCategoryInQueue(
+        photoIds: Collection<String>,
+        targetCategoryId: String?,
+        lockCategory: Boolean = true
+    )
+
+    fun clearCategoryInQueue(categoryId: String)
 
     fun getProcessedScreenshot(photoId: String): ProcessedScreenshotRecord?
 

@@ -124,6 +124,87 @@ class PhotoRepositoryTest {
     }
 
     @Test
+    fun testAgingStrictlyRequiresAgeOverConfiguredDaysAndEnforcesProEdit() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(testDispatcher)
+        val driver = InMemoryPersistenceDriver()
+        val repo = PhotoRepository(driver, scope)
+        testScheduler.advanceUntilIdle()
+
+        val dayMs = 24L * 60L * 60L * 1000L
+        val now = 2_000_000_000_000L
+
+        // Recent screenshot (2 days old) that IS processed and has a PAST suggestedEventDateMillis
+        val recentProcessed = repo.addPhoto(
+            fileName = "Screenshot_recent.png",
+            filePath = "/screenshots/recent.png",
+            title = "Recent Event",
+            isScreenshot = true,
+            dateAdded = now - (2L * dayMs)
+        )
+        repo.updatePhotoAiMetadata(
+            photoId = recentProcessed.id,
+            isScreenshot = true,
+            piiScrubbedText = "Hội thảo 15/11",
+            detectedIntent = "EVENT",
+            suggestedEventTitle = "Hội thảo",
+            suggestedEventDateMillis = now - dayMs, // past event
+            targetCategoryId = "cat_events",
+            isProcessed = true
+        )
+
+        // Screenshot at 29 days old (must NOT appear for 30-day rule)
+        repo.addPhoto(
+            fileName = "Screenshot_29d.png",
+            filePath = "/screenshots/29d.png",
+            title = "29 days",
+            isScreenshot = true,
+            dateAdded = now - (29L * dayMs)
+        )
+
+        // Screenshot at 31 days old (MUST appear for 30-day rule)
+        val old31d = repo.addPhoto(
+            fileName = "Screenshot_31d.png",
+            filePath = "/screenshots/31d.png",
+            title = "31 days",
+            isScreenshot = true,
+            dateAdded = now - (31L * dayMs)
+        )
+
+        // Non-screenshot photo older than 60 days (MUST NEVER appear)
+        repo.addPhoto(
+            fileName = "Camera_60d.jpg",
+            filePath = "/dcim/60d.jpg",
+            title = "Camera Photo",
+            isScreenshot = false,
+            dateAdded = now - (60L * dayMs)
+        )
+        testScheduler.advanceUntilIdle()
+
+        // Free tier cannot modify retention days
+        assertFalse(repo.setDefaultRetentionDays(7))
+        repo.setCategoryRetentionRule("cat_events", 1)
+        testScheduler.advanceUntilIdle()
+        assertEquals(30, repo.agingSettings.value.retentionDays)
+        assertTrue(repo.agingSettings.value.categoryRetentionDays.isEmpty())
+
+        // Free tier: only the 31-day-old screenshot matches 30-day cutoff
+        val freeAging = repo.getAgingPhotos(nowMillis = now)
+        assertEquals(listOf(old31d.id), freeAging.map { it.id })
+
+        // Pro tier CAN edit default retention days
+        repo.toggleUserTier(isPro = true)
+        testScheduler.advanceUntilIdle()
+        assertTrue(repo.setDefaultRetentionDays(14))
+        testScheduler.advanceUntilIdle()
+        assertEquals(14, repo.agingSettings.value.retentionDays)
+
+        val proAging14 = repo.getAgingPhotos(daysOld = 14, nowMillis = now)
+        assertEquals(2, proAging14.size)
+        assertFalse(proAging14.any { it.id == recentProcessed.id })
+    }
+
+    @Test
     fun testCustomAiCategoriesProEnforcement() = runTest {
         val testDispatcher = StandardTestDispatcher(testScheduler)
         val scope = TestScope(testDispatcher)
@@ -525,5 +606,129 @@ class PhotoRepositoryTest {
         assertEquals("Moo Beef Steak Trần Quốc Toản", updatedPhoto.suggestedEventTitle)
         assertTrue(updatedPhoto.categoryIds.contains("cat_tobuy"))
         assertFalse(updatedPhoto.categoryIds.contains("cat_events"))
+    }
+
+    @Test
+    fun testDefaultCategoriesMatchRedesignAndMigrateLegacyVisuals() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(testDispatcher)
+        val driver = InMemoryPersistenceDriver()
+        val repo = PhotoRepository(driver, scope)
+        testScheduler.advanceUntilIdle()
+
+        val defaults = repo.categories.value.associateBy { it.id }
+        assertEquals(5, defaults.size)
+        assertEquals("#1E4240" to "tag", defaults["cat_events"]?.let { it.colorHex to it.iconName })
+        assertEquals("#B89054" to "utensils", defaults["cat_tobuy"]?.let { it.colorHex to it.iconName })
+        assertEquals("#7E8D78" to "building", defaults["cat_reading"]?.let { it.colorHex to it.iconName })
+        assertEquals("#5A7364" to "leaf", defaults["cat_nature"]?.let { it.colorHex to it.iconName })
+        assertEquals("#7A5C7E" to "user", defaults["cat_personal"]?.let { it.colorHex to it.iconName })
+
+        // Legacy persisted JSON with old pre-redesign default colors/icons should migrate automatically
+        val legacyJson = """
+            {
+              "photos": [],
+              "folders": [],
+              "categories": [
+                {"id": "cat_events", "name": "Lịch & Sự kiện", "colorHex": "#3B82F6", "iconName": "plane", "createdAt": 1000},
+                {"id": "cat_tobuy", "name": "Cần mua & Chi tiêu", "colorHex": "#F59E0B", "iconName": "utensils", "createdAt": 2000},
+                {"id": "cat_reading", "name": "Đọc & Tham khảo", "colorHex": "#8B5CF6", "iconName": "tag", "createdAt": 3000},
+                {"id": "cat_nature", "name": "Thiên nhiên & Phong cảnh", "colorHex": "#009688", "iconName": "leaf", "createdAt": 4000},
+                {"id": "cat_personal", "name": "Cá nhân & Giấy tờ", "colorHex": "#EC4899", "iconName": "user", "createdAt": 5000}
+              ]
+            }
+        """.trimIndent()
+        val legacyDriver = InMemoryPersistenceDriver().apply { saveData(legacyJson) }
+        val migratedRepo = PhotoRepository(legacyDriver, scope)
+        testScheduler.advanceUntilIdle()
+
+        val migrated = migratedRepo.categories.value.associateBy { it.id }
+        assertEquals("#1E4240" to "tag", migrated["cat_events"]?.let { it.colorHex to it.iconName })
+        assertEquals("#B89054" to "utensils", migrated["cat_tobuy"]?.let { it.colorHex to it.iconName })
+        assertEquals("#7E8D78" to "building", migrated["cat_reading"]?.let { it.colorHex to it.iconName })
+        assertEquals("#5A7364" to "leaf", migrated["cat_nature"]?.let { it.colorHex to it.iconName })
+        assertEquals("#7A5C7E" to "user", migrated["cat_personal"]?.let { it.colorHex to it.iconName })
+    }
+
+    @Test
+    fun testReassignCategoryPersistsAcrossRestartAndBlocksStaleAiMerge() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(testDispatcher)
+        val driver = InMemoryPersistenceDriver()
+        val repo1 = PhotoRepository(driver, scope)
+        testScheduler.advanceUntilIdle()
+
+        repo1.toggleUserTier(isPro = true)
+        val customCat = repo1.createCategory("Hóa đơn nhà", colorHex = "#10B981")!!
+        val photo = repo1.addPhoto(
+            fileName = "bill.png",
+            filePath = "/p/bill.png",
+            title = "Tiền điện tháng 11",
+            isScreenshot = true,
+            dateAdded = 1_000_000L
+        )
+        testScheduler.advanceUntilIdle()
+
+        // Initially categorized by AI into default category "cat_tobuy"
+        repo1.updatePhotoAiMetadata(
+            photoId = photo.id,
+            isScreenshot = true,
+            piiScrubbedText = "Tổng thanh toán 500k",
+            detectedIntent = "SHOPPING",
+            targetCategoryId = "cat_tobuy",
+            isCloudEnriched = true
+        )
+        testScheduler.advanceUntilIdle()
+        assertEquals(setOf("cat_tobuy"), repo1.photos.value.first().categoryIds)
+
+        // User moves photo into the newly created custom category
+        val moved = repo1.reassignPhotosToCategory(listOf(photo.id), customCat.id)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, moved)
+        val movedPhoto = repo1.photos.value.first()
+        assertEquals(setOf(customCat.id), movedPhoto.categoryIds)
+        assertTrue(movedPhoto.isCategoryUserModified)
+
+        // Simulate exiting and re-entering the app with a fresh repository reading persisted JSON
+        val repo2 = PhotoRepository(driver, scope)
+        testScheduler.advanceUntilIdle()
+        val reloaded = repo2.photos.value.first()
+        assertEquals(setOf(customCat.id), reloaded.categoryIds)
+        assertTrue(reloaded.isCategoryUserModified)
+
+        // Simulate stale SQLite sync pushing old "cat_tobuy" back via updatePhotoAiMetadataBatch
+        repo2.updatePhotoAiMetadataBatch(
+            listOf(
+                com.example.test2.shared.repository.PhotoAiMetadataUpdate(
+                    photoId = reloaded.id,
+                    isScreenshot = true,
+                    targetCategoryId = "cat_tobuy",
+                    isCloudEnriched = true,
+                    suggestedEventDescription = "Enriched description"
+                )
+            )
+        )
+        testScheduler.advanceUntilIdle()
+
+        val afterSync = repo2.photos.value.first()
+        // Must ONLY have customCat.id, NOT both customCat.id and cat_tobuy
+        assertEquals(setOf(customCat.id), afterSync.categoryIds)
+        assertEquals("Enriched description", afterSync.suggestedEventDescription)
+
+        // Explicit manual rescan (forceUpdate = true) can still re-assign if requested
+        repo2.updatePhotoAiMetadata(
+            photoId = reloaded.id,
+            isScreenshot = true,
+            piiScrubbedText = "Tổng thanh toán 500k",
+            detectedIntent = "EVENT",
+            targetCategoryId = "cat_events",
+            isCloudEnriched = true,
+            forceUpdate = true
+        )
+        testScheduler.advanceUntilIdle()
+
+        val afterManualRescan = repo2.photos.value.first()
+        assertEquals(setOf("cat_events"), afterManualRescan.categoryIds)
+        assertFalse(afterManualRescan.isCategoryUserModified)
     }
 }

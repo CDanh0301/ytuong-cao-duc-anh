@@ -8,12 +8,12 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.example.test2.ai.CloudAiBackendClient
-import com.example.test2.ai.CloudAiConfigManager
 import com.example.test2.ai.LocalImageLabeler
-import com.example.test2.ai.VectorSemanticSearchEngine
-import com.example.test2.database.AppDatabaseHelper
+import com.example.test2.ai.PrivacyDecision
+import com.example.test2.ai.PrivacyPolicy
+import com.example.test2.data.local.prefs.CloudAiDefaults
 import com.example.test2.database.QueueStatus
+import com.example.test2.di.AppModule
 import com.example.test2.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -51,13 +51,19 @@ class CloudUpgradeWorker(
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        val aiConfig = CloudAiConfigManager.getConfig(context)
-        if (!aiConfig.isEnabled || aiConfig.apiKey.isBlank()) {
+        val aiConfig = AppModule.provideCloudAiPrefs(context).getConfig()
+        if (!aiConfig.isCloudReady()) {
             return@withContext Result.success()
         }
 
-        val dbHelper = AppDatabaseHelper.getInstance(context)
-        val itemsToUpgrade = dbHelper.getQueueItemsNeedingCloudUpgrade()
+        val dbHelper = AppModule.provideAppDatabaseHelper(context)
+        val queueDao = AppModule.provideScreenshotQueueDao(dbHelper)
+        val ftsDao = AppModule.provideFtsDao(dbHelper)
+        val vectorDao = AppModule.provideVectorDao(dbHelper)
+        val geminiApiService = AppModule.provideGeminiApiService(context)
+        val appDataSource = AppModule.provideAppDataSource(context)
+        val userCategories = appDataSource.getUserCategories()
+        val itemsToUpgrade = queueDao.getQueueItemsNeedingCloudUpgrade()
 
         for (item in itemsToUpgrade) {
             try {
@@ -68,8 +74,8 @@ class CloudUpgradeWorker(
                 val visualAnalysis = LocalImageLabeler.analyze(context, item.filePath)
 
                 // Privacy Gate: skip items containing sensitive documents or credentials
-                if (com.example.test2.ai.PrivacyPolicy.classify(scrubbedText, title, visualAnalysis.rawLabels) == com.example.test2.ai.PrivacyDecision.LOCAL_ONLY) {
-                    dbHelper.updateQueueItemState(
+                if (PrivacyPolicy.classify(scrubbedText, title, visualAnalysis.rawLabels) == PrivacyDecision.LOCAL_ONLY) {
+                    queueDao.updateQueueItemState(
                         photoId = item.photoId,
                         status = QueueStatus.COMPLETED.name,
                         scrubbedText = scrubbedText,
@@ -78,11 +84,10 @@ class CloudUpgradeWorker(
                     continue
                 }
 
-                val parsed = CloudAiBackendClient.analyzeWithFallback(
-                    context = context,
+                val parsed = geminiApiService.analyzeWithFallback(
                     scrubbedText = scrubbedText,
                     photoTitle = title,
-                    categories = emptyList(),
+                    categories = userCategories,
                     isPro = true,
                     hasFace = visualAnalysis.isPerson,
                     visualLabels = visualAnalysis.rawLabels
@@ -104,15 +109,16 @@ class CloudUpgradeWorker(
                     append(scrubbedText)
                 }.trim()
 
-                // Update SQLite queue entry
-                dbHelper.updateQueueItemState(
+                // Update SQLite queue entry (DAO preserves target_category_id when is_user_categorized == 1)
+                val effectiveCategoryId = if (item.isUserCategorized) item.targetCategoryId else parsed.targetCategoryId
+                queueDao.updateQueueItemState(
                     photoId = item.photoId,
                     status = QueueStatus.COMPLETED.name,
                     scrubbedText = scrubbedText,
                     detectedIntent = parsed.detectedIntent,
                     eventTitle = parsed.suggestedEventTitle,
                     eventDateMillis = parsed.suggestedEventDateMillis,
-                    targetCategoryId = parsed.targetCategoryId,
+                    targetCategoryId = effectiveCategoryId,
                     eventDescription = parsed.suggestedEventDescription,
                     summary = summary,
                     tags = semanticTagsStr,
@@ -124,34 +130,44 @@ class CloudUpgradeWorker(
                 )
 
                 // Update FTS5 with enriched columns
-                dbHelper.indexPhotoFts(
+                val categoryDisplayName = userCategories.firstOrNull { it.id == effectiveCategoryId }?.name
+                    ?: effectiveCategoryId
+                    ?: ""
+                ftsDao.indexPhotoFts(
                     photoId = item.photoId,
                     title = title,
                     scrubbedText = scrubbedText,
                     intent = parsed.detectedIntent,
-                    categoryNames = parsed.targetCategoryId ?: "",
+                    categoryNames = categoryDisplayName,
                     semanticTags = semanticTagsStr,
                     entities = entitiesStr,
                     summary = summary
                 )
 
-                // Generate and save 768D cloud neural embedding
-                val neuralVec = CloudAiBackendClient.getEmbedding(
+                // Generate and save 768D cloud neural embedding (enforcing privacy gate on fullSemanticDoc too)
+                val fullDocCheck = com.example.test2.ai.CloudPrivacyGateway.prepareTextForEmbedding(
                     text = fullSemanticDoc,
-                    apiKey = aiConfig.apiKey,
-                    modelName = CloudAiConfigManager.DEFAULT_EMBEDDING_MODEL,
-                    taskType = "RETRIEVAL_DOCUMENT"
+                    photoTitle = title,
+                    visualLabels = visualAnalysis.rawLabels
                 )
+                val neuralVec = if (fullDocCheck.isMeaningfulForCloud) {
+                    geminiApiService.getEmbedding(
+                        text = fullDocCheck.scrubbedText,
+                        apiKey = aiConfig.apiKey,
+                        modelName = CloudAiDefaults.DEFAULT_EMBEDDING_MODEL,
+                        taskType = "RETRIEVAL_DOCUMENT"
+                    )
+                } else null
                 if (neuralVec != null) {
-                    dbHelper.savePhotoNeuralVector(
+                    vectorDao.savePhotoNeuralVector(
                         photoId = item.photoId,
                         vector = neuralVec,
-                        modelName = CloudAiConfigManager.DEFAULT_EMBEDDING_MODEL,
+                        modelName = CloudAiDefaults.DEFAULT_EMBEDDING_MODEL,
                         modelVersion = "1.0"
                     )
                 }
             } catch (e: Exception) {
-                AppLogger.w("CloudUpgradeWorker", "Failed to enqueue worker", e)
+                AppLogger.w("CloudUpgradeWorker", "Failed upgrading item ${item.photoId}", e)
             }
         }
 

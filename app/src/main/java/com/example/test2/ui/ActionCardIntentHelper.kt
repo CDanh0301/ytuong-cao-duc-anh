@@ -9,6 +9,7 @@ import android.provider.ContactsContract
 import android.widget.Toast
 import com.example.test2.ai.SmartHeuristicParser
 import com.example.test2.shared.models.Photo
+import com.example.test2.util.AppLogger
 
 object ActionCardIntentHelper {
 
@@ -19,7 +20,8 @@ object ActionCardIntentHelper {
             clipboard.setPrimaryClip(clip)
             val msg = toastMessage ?: "Đã sao chép $label"
             Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.w("ActionCardIntent", "Failed copying to clipboard", e)
         }
     }
 
@@ -106,7 +108,8 @@ object ActionCardIntentHelper {
         return try {
             context.startActivity(SmartHeuristicParser.createCalendarIntentForPhoto(photo))
             true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.w("ActionCardIntent", "Failed launching calendar for photo ${photo.id}", e)
             false
         }
     }

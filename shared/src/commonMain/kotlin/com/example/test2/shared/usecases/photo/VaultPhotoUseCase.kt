@@ -1,8 +1,8 @@
 package com.example.test2.shared.usecases.photo
 
 import com.example.test2.shared.models.Photo
+import com.example.test2.shared.models.PhotoComparators
 import com.example.test2.shared.repository.IPhotoRepository
-import com.example.test2.shared.repository.PhotoRepository
 import com.example.test2.shared.usecases.QueueSyncPort
 import com.example.test2.shared.usecases.VaultPort
 import com.example.test2.shared.usecases.VaultedFileResult
@@ -130,7 +130,7 @@ class VaultPhotoUseCase(
         val currentPhotos = repository.photos.value
         val vaultedList = currentPhotos.filter {
             it.filePath.endsWith(".enc") || (it.isScreenshot && !it.filePath.startsWith("content://"))
-        }.sortedWith(PhotoRepository.chronologicalAscComparator)
+        }.sortedWith(PhotoComparators.chronologicalAscComparator)
 
         if (vaultedList.isEmpty()) {
             vaultPort.setVaultEnabled(false)

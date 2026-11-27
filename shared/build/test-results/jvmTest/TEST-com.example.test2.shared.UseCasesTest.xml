@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="UseCasesTest[jvm]" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-26T05:20:19.856Z" hostname="VSF-0113Z4-L" time="0.062">
+<testsuite name="UseCasesTest[jvm]" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-27T05:15:03.954Z" hostname="VSF-0113Z4-L" time="0.106">
   <properties/>
-  <testcase name="testVaultPhotoUseCaseVaultSingleRestoreSingleAndRestoreAll[jvm]" classname="com.example.test2.shared.UseCasesTest" time="0.019"/>
+  <testcase name="testVaultPhotoUseCaseVaultSingleRestoreSingleAndRestoreAll[jvm]" classname="com.example.test2.shared.UseCasesTest" time="0.02"/>
+  <testcase name="testAgingCleanupUseCaseEnforcesFreeVsProAndCatchUpScan[jvm]" classname="com.example.test2.shared.UseCasesTest" time="0.007"/>
   <testcase name="testScanDevicePhotosUseCaseAutoVaultsEligibleScreenshots[jvm]" classname="com.example.test2.shared.UseCasesTest" time="0.007"/>
-  <testcase name="testCategoryAndSearchAndAgingUseCases[jvm]" classname="com.example.test2.shared.UseCasesTest" time="0.019"/>
+  <testcase name="testPhotoDetailsScanCardsCategoryRenameAndSettingsUseCases[jvm]" classname="com.example.test2.shared.UseCasesTest" time="0.039"/>
+  <testcase name="testCategoryAndSearchAndAgingUseCases[jvm]" classname="com.example.test2.shared.UseCasesTest" time="0.015"/>
   <testcase name="testImportPhotosUseCaseUsesCloudWhenQuotaAvailableAndFallsBackWhenExhausted[jvm]" classname="com.example.test2.shared.UseCasesTest" time="0.01"/>
-  <testcase name="testToggleFavoriteAndDeletePhotoUseCases[jvm]" classname="com.example.test2.shared.UseCasesTest" time="0.006"/>
+  <testcase name="testToggleFavoriteAndDeletePhotoUseCases[jvm]" classname="com.example.test2.shared.UseCasesTest" time="0.007"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

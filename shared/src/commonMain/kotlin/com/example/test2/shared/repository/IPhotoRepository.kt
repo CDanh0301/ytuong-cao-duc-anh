@@ -69,6 +69,7 @@ interface IPhotoRepository {
     fun markAsProcessed(photoId: String, isProcessed: Boolean)
 
     fun getAgingPhotos(daysOld: Int = agingSettings.value.retentionDays, nowMillis: Long = 0L): List<Photo>
+    fun setDefaultRetentionDays(retentionDays: Int): Boolean
     fun setCategoryRetentionRule(categoryId: String, retentionDays: Int)
 
     fun batchDeletePhotos(photoIds: List<String>): List<Photo>
@@ -86,7 +87,8 @@ interface IPhotoRepository {
         isFavorite: Boolean = false,
         isScreenshot: Boolean = false,
         dateAdded: Long = 0L,
-        fileSizeBytes: Long = 0L
+        fileSizeBytes: Long = 0L,
+        isCategoryUserModified: Boolean = false
     ): Photo
 
     fun addVaultedPhotos(newPhotos: List<Photo>)

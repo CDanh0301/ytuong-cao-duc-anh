@@ -1,8 +1,8 @@
 package com.example.test2.ai
 
-import android.util.Log
-import com.example.test2.database.DefaultCategories
+import com.example.test2.shared.models.DefaultCategories
 import com.example.test2.shared.models.Category
+import com.example.test2.util.AppLogger
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
@@ -301,7 +301,7 @@ object GeminiResponseParser {
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed parsing batch JSON response: ${e.message}", e)
+            AppLogger.e(TAG, "Failed parsing batch JSON response: ${e.message}", e)
         }
 
         // Independent Fallback for any genuinely missing items

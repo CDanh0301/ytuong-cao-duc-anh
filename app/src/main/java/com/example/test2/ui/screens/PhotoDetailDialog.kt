@@ -65,7 +65,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
-import com.example.test2.database.DefaultCategories
+import com.example.test2.shared.models.DefaultCategories
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -95,6 +95,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -108,6 +109,7 @@ import androidx.compose.material.icons.filled.Directions
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -117,6 +119,7 @@ import com.example.test2.shared.models.Category
 import com.example.test2.shared.models.Folder
 import com.example.test2.shared.models.Photo
 import com.example.test2.ui.ActionCardIntentHelper
+import com.example.test2.ui.theme.AppColors
 import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
@@ -375,7 +378,7 @@ fun ImageViewerDialog(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFF020617).copy(alpha = backgroundAlpha))
+                .background(AppColors.ViewerBackdrop.copy(alpha = backgroundAlpha))
         ) {
             // Horizontal Pager for swiping between photos (swipe disabled when zoomed in or when dismissing)
             HorizontalPager(
@@ -450,36 +453,25 @@ fun ImageViewerDialog(
                         )
                     }
 
-                    // Title & position indicator
-                    Column(
+                    // Position & date indicator (title removed to prevent clutter)
+                    Row(
                         modifier = Modifier
                             .weight(1f)
-                            .padding(horizontal = 12.dp)
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(
-                            text = currentPhoto.title,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            text = "${pagerState.currentPage + 1} / ${photos.size}",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = AppColors.OchreGold
                         )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = "${pagerState.currentPage + 1} / ${photos.size}",
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFF60A5FA)
-                            )
-                            Text(
-                                text = "• ${formatDate(currentPhoto.dateAdded)}",
-                                fontSize = 11.5.sp,
-                                color = Color(0xFFCBD5E1)
-                            )
-                        }
+                        Text(
+                            text = "• ${formatDate(currentPhoto.dateAdded)}",
+                            fontSize = 12.5.sp,
+                            color = Color(0xFFD5D7CC)
+                        )
                     }
 
                     // Right action buttons: Favorite & Settings
@@ -495,7 +487,7 @@ fun ImageViewerDialog(
                             Icon(
                                 imageVector = if (currentPhoto.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                                 contentDescription = "Yêu thích",
-                                tint = if (currentPhoto.isFavorite) Color(0xFFEF4444) else Color.White,
+                                tint = if (currentPhoto.isFavorite) AppColors.TerracottaAlert else Color.White,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -504,7 +496,8 @@ fun ImageViewerDialog(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(20.dp))
-                                .background(Color(0xFF2563EB))
+                                .background(AppColors.ForestTeal)
+                                .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(20.dp))
                                 .clickable { onOpenSettings(currentPhoto) }
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             contentAlignment = Alignment.Center
@@ -560,8 +553,8 @@ fun ImageViewerDialog(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(14.dp))
-                                .background(Color(0xFF1E293B).copy(alpha = 0.92f))
-                                .border(1.dp, Color(0xFF3B82F6).copy(alpha = 0.40f), RoundedCornerShape(14.dp))
+                                .background(AppColors.DrawerSurface.copy(alpha = 0.94f))
+                                .border(1.dp, AppColors.OchreGold.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
                                 .clickable { isActionDrawerExpanded = true }
                                 .pointerInput(Unit) {
                                     detectVerticalDragGestures { _, dragAmount ->
@@ -630,7 +623,7 @@ fun ImageViewerDialog(
                                 Icon(
                                     Icons.Default.Folder,
                                     contentDescription = null,
-                                    tint = Color(0xFF60A5FA),
+                                    tint = AppColors.OchreGold,
                                     modifier = Modifier.size(15.dp)
                                 )
                                 Text(
@@ -670,7 +663,7 @@ fun ImageViewerDialog(
                                 } else {
                                     "Thêm vào lịch"
                                 }
-                                val buttonBg = if (isShopping) Color(0xFFF59E0B) else Color(0xFF10B981)
+                                val buttonBg = if (isShopping) AppColors.OchreGold else AppColors.ForestTeal
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(16.dp))
@@ -713,9 +706,9 @@ fun ImageViewerDialog(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
-                        .background(Color(0xFF0F172A).copy(alpha = 0.98f))
-                        .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+                        .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                        .background(AppColors.DrawerSurface.copy(alpha = 0.98f))
+                        .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
                         .pointerInput(Unit) {
                             detectVerticalDragGestures { _, dragAmount ->
                                 if (dragAmount > 20f) {
@@ -846,8 +839,8 @@ fun PhotoSettingsDialog(
             modifier = Modifier
                 .fillMaxWidth(0.94f)
                 .heightIn(max = 700.dp)
-                .clip(RoundedCornerShape(20.dp)),
-            color = MaterialTheme.colorScheme.surface,
+                .clip(RoundedCornerShape(24.dp)),
+            color = AppColors.SurfaceAlabaster,
             tonalElevation = 6.dp
         ) {
             Column(
@@ -866,19 +859,20 @@ fun PhotoSettingsDialog(
                 ) {
                     Text(
                         text = "Cài đặt ảnh",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        fontFamily = FontFamily.Serif,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = AppColors.ForestTeal
                     )
                     IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = "Đóng", tint = Color(0xFF64748B))
+                        Icon(Icons.Default.Close, contentDescription = "Đóng", tint = AppColors.WarmTaupeText)
                     }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // Title
-                Text("Tiêu đề ảnh", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF334155))
+                Text("Tiêu đề ảnh", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = AppColors.DeepPineText)
                 Spacer(modifier = Modifier.height(4.dp))
                 OutlinedTextField(
                     value = title,
@@ -888,33 +882,42 @@ fun PhotoSettingsDialog(
                         keyboardType = KeyboardType.Text,
                         hintLocales = LocaleList(ComposeLocale("vi"), ComposeLocale("en"))
                     ),
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = AppColors.CanvasCream,
+                        unfocusedContainerColor = AppColors.CanvasCream,
+                        focusedBorderColor = AppColors.ForestTeal,
+                        unfocusedBorderColor = AppColors.BorderSand
+                    ),
                     modifier = Modifier.fillMaxWidth()
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // Folder Location
-                Text("Thư mục lưu trữ", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF334155))
+                Text("Thư mục lưu trữ", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = AppColors.DeepPineText)
                 Spacer(modifier = Modifier.height(4.dp))
                 Box {
                     OutlinedButton(
                         onClick = { folderMenuExpanded = true },
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, AppColors.BorderSand),
+                        colors = ButtonDefaults.outlinedButtonColors(containerColor = AppColors.CanvasCream),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color(0xFF2563EB))
+                        Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(18.dp), tint = AppColors.ForestTeal)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(currentFolderName, color = MaterialTheme.colorScheme.onSurface)
+                        Text(currentFolderName, color = AppColors.DeepPineText)
                     }
 
                     DropdownMenu(
                         expanded = folderMenuExpanded,
-                        onDismissRequest = { folderMenuExpanded = false }
+                        onDismissRequest = { folderMenuExpanded = false },
+                        modifier = Modifier.background(AppColors.SurfaceAlabaster)
                     ) {
                         folders.forEach { folder ->
                             DropdownMenuItem(
-                                text = { Text(folder.name) },
+                                text = { Text(folder.name, color = AppColors.DeepPineText) },
                                 onClick = {
                                     selectedFolderId = folder.id
                                     folderMenuExpanded = false
@@ -927,7 +930,7 @@ fun PhotoSettingsDialog(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // Categories Selector
-                Text("Gán danh mục & Thẻ", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF334155))
+                Text("Gán danh mục & Thẻ", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = AppColors.DeepPineText)
                 Spacer(modifier = Modifier.height(6.dp))
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -939,10 +942,10 @@ fun PhotoSettingsDialog(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(16.dp))
-                                .background(if (isSelected) catColor.copy(alpha = 0.18f) else Color(0xFFF1F5F9))
+                                .background(if (isSelected) catColor.copy(alpha = 0.16f) else AppColors.WarmSandSoft)
                                 .border(
                                     width = 1.dp,
-                                    color = if (isSelected) catColor else Color(0xFFE2E8F0),
+                                    color = if (isSelected) catColor else AppColors.BorderSand,
                                     shape = RoundedCornerShape(16.dp)
                                 )
                                 .clickable {
@@ -966,7 +969,7 @@ fun PhotoSettingsDialog(
                                     text = category.name,
                                     fontSize = 12.sp,
                                     fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                    color = if (isSelected) catColor else Color(0xFF334155)
+                                    color = if (isSelected) catColor else AppColors.DeepPineText
                                 )
                             }
                         }
@@ -979,12 +982,12 @@ fun PhotoSettingsDialog(
                 Text(
                     text = "Tập tin: ${photo.fileName} (${formatFileSize(photo.fileSizeBytes)})",
                     fontSize = 11.5.sp,
-                    color = Color(0xFF64748B)
+                    color = AppColors.WarmTaupeText
                 )
                 Text(
                     text = "Ngày tạo: ${formatDate(photo.dateAdded)}",
                     fontSize = 11.5.sp,
-                    color = Color(0xFF64748B)
+                    color = AppColors.WarmTaupeText
                 )
 
                 // Minimal action button to re-scan if needed (Zero Clutter)
@@ -993,25 +996,26 @@ fun PhotoSettingsDialog(
                     OutlinedButton(
                         onClick = { onScanPhoto.invoke(photo.id) },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
+                        border = androidx.compose.foundation.BorderStroke(1.dp, AppColors.BorderSand),
+                        shape = RoundedCornerShape(14.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Search,
                             contentDescription = null,
                             modifier = Modifier.size(16.dp),
-                            tint = Color(0xFF3B82F6)
+                            tint = AppColors.ForestTeal
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = if (!photo.isProcessed) "Quét & trích xuất thông tin" else "Quét lại ảnh",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF3B82F6)
+                            color = AppColors.ForestTeal
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // Action buttons: Favorite & Delete
                 Row(
@@ -1020,37 +1024,41 @@ fun PhotoSettingsDialog(
                 ) {
                     OutlinedButton(
                         onClick = { isFavorite = !isFavorite },
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (isFavorite) AppColors.TerracottaAlert.copy(alpha = 0.4f) else AppColors.BorderSand
+                        ),
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(
                             imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                             contentDescription = "Yêu thích",
-                            tint = if (isFavorite) Color(0xFFEF4444) else Color(0xFF64748B),
+                            tint = if (isFavorite) AppColors.TerracottaAlert else AppColors.WarmTaupeText,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = if (isFavorite) "Đã thích" else "Yêu thích",
                             fontSize = 13.sp,
-                            color = if (isFavorite) Color(0xFFEF4444) else MaterialTheme.colorScheme.onSurface
+                            color = if (isFavorite) AppColors.TerracottaAlert else AppColors.DeepPineText
                         )
                     }
 
                     Button(
                         onClick = { onDelete(photo) },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFEE2E2)),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.TerracottaLight),
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(
                             Icons.Outlined.Delete,
                             contentDescription = "Xóa",
-                            tint = Color(0xFFEF4444),
+                            tint = AppColors.TerracottaAlert,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Xóa", fontSize = 13.sp, color = Color(0xFFEF4444))
+                        Text("Xóa", fontSize = 13.sp, color = AppColors.TerracottaAlert)
                     }
                 }
 
@@ -1062,10 +1070,11 @@ fun PhotoSettingsDialog(
 
                 OutlinedButton(
                     onClick = { showVaultConfirmDialog = true },
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, AppColors.BorderSand),
                     colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = if (isVaulted) Color(0xFF0284C7) else Color(0xFF4F46E5)
+                        contentColor = if (isVaulted) AppColors.OchreGoldDark else AppColors.ForestTeal
                     )
                 ) {
                     Icon(
@@ -1084,10 +1093,13 @@ fun PhotoSettingsDialog(
                 if (showVaultConfirmDialog) {
                     AlertDialog(
                         onDismissRequest = { showVaultConfirmDialog = false },
+                        containerColor = AppColors.SurfaceAlabaster,
                         title = {
                             Text(
                                 text = if (isVaulted) "Khôi phục ảnh về máy?" else "Chuyển vào Két bảo mật?",
-                                fontWeight = FontWeight.Bold
+                                fontFamily = FontFamily.Serif,
+                                fontWeight = FontWeight.SemiBold,
+                                color = AppColors.DeepPineText
                             )
                         },
                         text = {
@@ -1095,7 +1107,8 @@ fun PhotoSettingsDialog(
                                 text = if (isVaulted)
                                     "Ảnh sẽ được giải mã và lưu lại vào thư viện ảnh công khai của thiết bị."
                                 else
-                                    "Ảnh sẽ được mã hóa an toàn và chỉ có thể truy cập khi mở khóa ứng dụng."
+                                    "Ảnh sẽ được mã hóa an toàn và chỉ có thể truy cập khi mở khóa ứng dụng.",
+                                color = AppColors.WarmTaupeText
                             )
                         },
                         confirmButton = {
@@ -1108,14 +1121,15 @@ fun PhotoSettingsDialog(
                                     } else {
                                         onVaultSinglePhoto?.invoke(photo)
                                     }
-                                }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = AppColors.ForestTeal)
                             ) {
                                 Text("Đồng ý")
                             }
                         },
                         dismissButton = {
                             TextButton(onClick = { showVaultConfirmDialog = false }) {
-                                Text("Hủy")
+                                Text("Hủy", color = AppColors.WarmTaupeText)
                             }
                         }
                     )
@@ -1135,8 +1149,8 @@ fun PhotoSettingsDialog(
                         )
                         onDismiss()
                     },
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.ForestTeal),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -1210,7 +1224,7 @@ fun SmartActionCardBar(
                     OneTapActionButton(
                         label = "Chỉ đường Maps",
                         icon = Icons.Default.Directions,
-                        backgroundColor = Color(0xFF2563EB),
+                        backgroundColor = AppColors.OchreGold,
                         onClick = { ActionCardIntentHelper.openGoogleMaps(context, fullAddress) }
                     )
                     OneTapActionButton(
@@ -1231,7 +1245,7 @@ fun SmartActionCardBar(
                         OneTapActionButton(
                             label = "Chép STK",
                             icon = Icons.Default.ContentCopy,
-                            backgroundColor = Color(0xFF0284C7),
+                            backgroundColor = AppColors.OchreGold,
                             onClick = { ActionCardIntentHelper.copyToClipboard(context, "STK", acc, "Đã sao chép STK: $acc ($bank)") }
                         )
                     }
@@ -1247,7 +1261,7 @@ fun SmartActionCardBar(
                         OneTapActionButton(
                             label = "Xem mã QR",
                             icon = Icons.Default.QrCode,
-                            backgroundColor = Color(0xFF059669),
+                            backgroundColor = AppColors.ForestTeal,
                             onClick = onOpenQr
                         )
                     }
@@ -1354,8 +1368,8 @@ fun QrPreviewDialog(
         Surface(
             modifier = Modifier
                 .fillMaxWidth(0.92f)
-                .clip(RoundedCornerShape(20.dp)),
-            color = Color.White,
+                .clip(RoundedCornerShape(24.dp)),
+            color = AppColors.SurfaceAlabaster,
             tonalElevation = 8.dp
         ) {
             Column(
@@ -1371,12 +1385,13 @@ fun QrPreviewDialog(
                 ) {
                     Text(
                         text = "Mã QR Chuyển Khoản",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A)
+                        fontFamily = FontFamily.Serif,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = AppColors.ForestTeal
                     )
                     IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = "Đóng", tint = Color(0xFF64748B))
+                        Icon(Icons.Default.Close, contentDescription = "Đóng", tint = AppColors.WarmTaupeText)
                     }
                 }
 
@@ -1387,8 +1402,8 @@ fun QrPreviewDialog(
                     modifier = Modifier
                         .size(240.dp)
                         .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0xFFF8FAFC))
-                        .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(16.dp)),
+                        .background(AppColors.CanvasCream)
+                        .border(1.dp, AppColors.BorderSand, RoundedCornerShape(16.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     AsyncImage(
@@ -1408,14 +1423,14 @@ fun QrPreviewDialog(
                     text = "$bank • $acc",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0284C7)
+                    color = AppColors.ForestTeal
                 )
                 if (holder.isNotBlank()) {
                     Text(
                         text = holder,
                         fontSize = 12.5.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF334155)
+                        color = AppColors.DeepPineText
                     )
                 }
                 if (amount > 0) {
@@ -1423,7 +1438,7 @@ fun QrPreviewDialog(
                         text = "${java.text.DecimalFormat("#,###").format(amount)} đ",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF059669)
+                        color = AppColors.OchreGoldDark
                     )
                 }
 
@@ -1434,8 +1449,8 @@ fun QrPreviewDialog(
                         ActionCardIntentHelper.copyToClipboard(context, "STK", acc, "Đã sao chép STK: $acc ($bank)")
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.ForestTeal)
                 ) {
                     Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.White)
                     Spacer(modifier = Modifier.width(6.dp))

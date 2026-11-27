@@ -1,7 +1,11 @@
 package com.example.test2.ai
 
 import android.content.Context
+import com.example.test2.data.local.prefs.CloudAiDefaults
+import com.example.test2.data.local.prefs.CloudAiPrefsDataSource
+import com.example.test2.data.remote.CategoryCandidateSnippet
 import com.example.test2.shared.models.Category
+import com.example.test2.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
@@ -48,17 +52,11 @@ object GeminiRateLimiter {
         val now = System.currentTimeMillis()
         val duration = (if (retryAfterSeconds > 0) retryAfterSeconds else 15L) * 1000L
         backoffUntilMillis = now + duration
-        android.util.Log.w("GeminiRateLimiter", "Rate limit 429 hit. Backing off for ${duration / 1000} seconds.")
+        AppLogger.w("GeminiRateLimiter", "Rate limit 429 hit. Backing off for ${duration / 1000} seconds.")
     }
 }
 
-data class BatchPhotoItem(
-    val photoId: String,
-    val photoTitle: String,
-    val scrubbedText: String,
-    val hasFace: Boolean = false,
-    val visualLabels: List<String> = emptyList()
-)
+typealias BatchPhotoItem = com.example.test2.data.remote.BatchPhotoItem
 
 object CloudAiBackendClient {
 
@@ -66,10 +64,49 @@ object CloudAiBackendClient {
     private const val CONNECT_TIMEOUT_MS = 15_000
     private const val READ_TIMEOUT_MS = 25_000
 
+    private fun resolveEndpointUrl(
+        modelName: String,
+        action: String,
+        customEndpoint: String = "",
+        proxyBaseUrl: String = CloudAiDefaults.PROXY_BASE_URL
+    ): String? {
+        val candidate = when {
+            customEndpoint.isNotBlank() -> customEndpoint.trim()
+            proxyBaseUrl.isNotBlank() -> "${proxyBaseUrl.trim().trimEnd('/')}/${modelName.trim()}:$action"
+            else -> "$GEMINI_BASE_URL/${modelName.trim()}:$action"
+        }
+        return if (CloudPrivacyGateway.isSafeHttpsUrl(candidate)) candidate else null
+    }
+
+    private fun openHttpsConnection(
+        urlString: String,
+        apiKey: String,
+        method: String = "POST",
+        connectTimeoutMs: Int = CONNECT_TIMEOUT_MS,
+        readTimeoutMs: Int = READ_TIMEOUT_MS
+    ): HttpURLConnection {
+        require(CloudPrivacyGateway.isSafeHttpsUrl(urlString)) {
+            "Rejected non-HTTPS Cloud AI endpoint"
+        }
+        val url = URL(urlString)
+        return (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = method
+            connectTimeout = connectTimeoutMs
+            readTimeout = readTimeoutMs
+            if (method == "POST") {
+                doOutput = true
+            }
+            setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+            if (apiKey.isNotBlank()) {
+                setRequestProperty("x-goog-api-key", apiKey.trim())
+            }
+        }
+    }
+
     /**
      * Primary entry point for screenshot analysis:
-     * Attempts Cloud AI analysis if configured and enabled;
-     * seamlessly falls back to SmartHeuristicParser if offline, unconfigured, or on error.
+     * Enforces [CloudPrivacyGateway] (fail-closed) before any remote request;
+     * seamlessly falls back to [SmartHeuristicParser] if LOCAL_ONLY, offline, unconfigured, or on error.
      */
     suspend fun analyzeWithFallback(
         context: Context,
@@ -80,10 +117,10 @@ object CloudAiBackendClient {
         hasFace: Boolean = false,
         visualLabels: List<String> = emptyList()
     ): ParsedScreenshotData = withContext(Dispatchers.IO) {
-        val config = CloudAiConfigManager.getConfig(context)
-        val privacy = PrivacyPolicy.classify(scrubbedText, photoTitle, visualLabels)
+        val config = CloudAiPrefsDataSource(context).getConfig()
+        val sanitized = CloudPrivacyGateway.prepareForAnalysis(scrubbedText, photoTitle, visualLabels)
 
-        if (privacy == PrivacyDecision.LOCAL_ONLY || !config.isEnabled || config.apiKey.isBlank()) {
+        if (sanitized.decision == PrivacyDecision.LOCAL_ONLY || !config.isCloudReady()) {
             return@withContext SmartHeuristicParser.parse(
                 scrubbedText = scrubbedText,
                 photoTitle = photoTitle,
@@ -102,8 +139,9 @@ object CloudAiBackendClient {
                         apiKey = config.apiKey,
                         modelName = config.modelName,
                         customEndpoint = config.customEndpoint,
-                        scrubbedText = scrubbedText,
-                        photoTitle = photoTitle,
+                        proxyBaseUrl = config.proxyBaseUrl,
+                        scrubbedText = sanitized.scrubbedText,
+                        photoTitle = sanitized.scrubbedTitle,
                         categories = categories,
                         isPro = isPro,
                         hasFace = hasFace,
@@ -112,7 +150,7 @@ object CloudAiBackendClient {
                     break
                 } catch (e: Exception) {
                     if (e.message?.contains("429") == true && attempt == 0) {
-                        android.util.Log.w("CloudAiBackendClient", "Rate limit 429 encountered during single scan. Backing off 2.5s before retry...")
+                        AppLogger.w("CloudAiBackendClient", "Rate limit 429 encountered during single scan. Backing off 2.5s before retry...")
                         delay(2500L)
                         continue
                     } else {
@@ -128,7 +166,7 @@ object CloudAiBackendClient {
                 visualLabels = visualLabels
             )
         } catch (e: Exception) {
-            android.util.Log.e("CloudAiBackendClient", "Gemini analysis failed for model ${config.modelName}: ${e.message}. Falling back to SmartHeuristicParser.", e)
+            AppLogger.e("CloudAiBackendClient", "Gemini analysis failed for model ${config.modelName}: ${e.message}. Falling back to SmartHeuristicParser.", e)
             // Graceful fallback to on-device heuristic parser
             SmartHeuristicParser.parse(
                 scrubbedText = scrubbedText,
@@ -141,13 +179,14 @@ object CloudAiBackendClient {
     }
 
     /**
-     * Calls Gemini Generative Language REST API with PII-scrubbed text.
-     * Guarantees that raw images are NEVER sent over the network (IDEA.md Part 1).
+     * Calls Gemini Generative Language REST API (or HTTPS Backend Proxy) with PII-scrubbed text.
+     * Guarantees that raw images and PII are NEVER sent over the network.
      */
     private fun callGeminiApi(
         apiKey: String,
         modelName: String,
         customEndpoint: String,
+        proxyBaseUrl: String,
         scrubbedText: String,
         photoTitle: String,
         categories: List<Category>,
@@ -155,11 +194,17 @@ object CloudAiBackendClient {
         hasFace: Boolean = false,
         visualLabels: List<String> = emptyList()
     ): ParsedScreenshotData? {
-        val urlString = if (customEndpoint.isNotBlank()) {
-            customEndpoint
-        } else {
-            "$GEMINI_BASE_URL/${modelName.trim()}:generateContent"
+        val sanitized = CloudPrivacyGateway.prepareForAnalysis(scrubbedText, photoTitle, visualLabels)
+        if (sanitized.decision == PrivacyDecision.LOCAL_ONLY) {
+            return null
         }
+
+        val urlString = resolveEndpointUrl(
+            modelName = modelName,
+            action = "generateContent",
+            customEndpoint = customEndpoint,
+            proxyBaseUrl = proxyBaseUrl
+        ) ?: throw IllegalArgumentException("Invalid or non-HTTPS Cloud AI endpoint")
 
         val effectiveCategories = if (categories.isNotEmpty()) categories else SmartHeuristicParser.DEFAULT_CATEGORIES
         val categoriesList = effectiveCategories.joinToString(", ") { "${it.id}: '${it.name}'" }
@@ -173,7 +218,8 @@ object CloudAiBackendClient {
 
         val systemInstruction = """
             You are an expert AI assistant that organizes screenshots and photos for users.
-            Input text is OCR-extracted and pre-scrubbed of PII (Credit cards, passwords, phone numbers, CCCD are redacted).
+            Input text is OCR-extracted and pre-scrubbed of PII (placeholders such as [BANK_ACCOUNT], [CREDIT_CARD], [PHONE_NUMBER], [EMAIL_REDACTED], [ID_NUMBER], [PASSPORT_NO], [REDACTED_SECRET] indicate redacted tokens).
+            NEVER copy bracketed redaction tokens like [BANK_ACCOUNT], [PHONE_NUMBER], or [EMAIL_REDACTED] into 'suggested_title', 'suggested_event_title', or 'summary'.
             Analyze the user intent from the text and title, and return a structured JSON response.
             
             ${buildCoreClassificationInstructions(categoriesList, customCatInstruction)}
@@ -200,10 +246,10 @@ object CloudAiBackendClient {
         val visualLabelsText = if (visualLabels.isNotEmpty()) "\nOn-Device Visual Labels (ML Kit): ${visualLabels.joinToString(", ")}" else ""
         val visualContext = if (hasFace) "\nVisual cue detected: Human face / portrait photo present in the image." else ""
         val promptText = """
-            Original File Title: $photoTitle
+            Original File Title: ${sanitized.scrubbedTitle}
             $visualLabelsText$visualContext
             Scrubbed Screenshot Text:
-            $scrubbedText
+            ${sanitized.scrubbedText}
         """.trimIndent()
 
         val requestBody = JSONObject().apply {
@@ -225,17 +271,7 @@ object CloudAiBackendClient {
             put("generationConfig", generationConfig)
         }
 
-        val url = URL(urlString)
-        val conn = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            connectTimeout = CONNECT_TIMEOUT_MS
-            readTimeout = READ_TIMEOUT_MS
-            doOutput = true
-            setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-            if (apiKey.isNotBlank()) {
-                setRequestProperty("x-goog-api-key", apiKey.trim())
-            }
-        }
+        val conn = openHttpsConnection(urlString = urlString, apiKey = apiKey)
 
         OutputStreamWriter(conn.outputStream, "UTF-8").use { writer ->
             writer.write(requestBody.toString())
@@ -246,7 +282,7 @@ object CloudAiBackendClient {
         if (responseCode !in 200..299) {
             val errorStream = conn.errorStream ?: conn.inputStream
             val errorMsg = errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $responseCode"
-            android.util.Log.e("CloudAiBackendClient", "Gemini API error ($responseCode) for model $modelName: $errorMsg")
+            AppLogger.e("CloudAiBackendClient", "Gemini API error ($responseCode) for model $modelName: $errorMsg")
             if (responseCode == 429) {
                 GeminiRateLimiter.reportRateLimitHit()
             }
@@ -302,7 +338,7 @@ object CloudAiBackendClient {
 
     /**
      * Batch Gemini Analysis: Analyzes 4-6 photos in a single HTTP request.
-     * Guaranteed 100% parity with single analysis, 5x throughput, zero 429 errors.
+     * Enforces [CloudPrivacyGateway] (fail-closed) per item before any network transmission.
      */
     suspend fun analyzeBatchWithGemini(
         context: Context,
@@ -311,14 +347,27 @@ object CloudAiBackendClient {
         isPro: Boolean = false
     ): Map<String, ParsedScreenshotData> = withContext(Dispatchers.IO) {
         if (items.isEmpty()) return@withContext emptyMap()
-        val config = CloudAiConfigManager.getConfig(context)
+        val config = CloudAiPrefsDataSource(context).getConfig()
 
-        // Defense-in-depth: separate LOCAL_ONLY items from CLOUD_ELIGIBLE
-        val eligibleItems = items.filter {
-            PrivacyPolicy.classify(it.scrubbedText, it.photoTitle, it.visualLabels) == PrivacyDecision.CLOUD_ELIGIBLE
-        }
-        val localOnlyItems = items.filter {
-            PrivacyPolicy.classify(it.scrubbedText, it.photoTitle, it.visualLabels) == PrivacyDecision.LOCAL_ONLY
+        // Defense-in-depth: sanitize and separate LOCAL_ONLY items from CLOUD_ELIGIBLE
+        val eligibleItems = mutableListOf<BatchPhotoItem>()
+        val localOnlyItems = mutableListOf<BatchPhotoItem>()
+        for (item in items) {
+            val sanitized = CloudPrivacyGateway.prepareForAnalysis(
+                rawOrScrubbedText = item.scrubbedText,
+                photoTitle = item.photoTitle,
+                visualLabels = item.visualLabels
+            )
+            if (sanitized.decision == PrivacyDecision.CLOUD_ELIGIBLE) {
+                eligibleItems.add(
+                    item.copy(
+                        photoTitle = sanitized.scrubbedTitle,
+                        scrubbedText = sanitized.scrubbedText
+                    )
+                )
+            } else {
+                localOnlyItems.add(item)
+            }
         }
 
         val localResults = localOnlyItems.associate { item ->
@@ -331,7 +380,7 @@ object CloudAiBackendClient {
             )
         }
 
-        if (!config.isEnabled || config.apiKey.isBlank() || eligibleItems.isEmpty()) {
+        if (!config.isCloudReady() || eligibleItems.isEmpty()) {
             val remainingLocal = eligibleItems.associate { item ->
                 item.photoId to SmartHeuristicParser.parse(
                     scrubbedText = item.scrubbedText,
@@ -350,13 +399,14 @@ object CloudAiBackendClient {
                 apiKey = config.apiKey,
                 modelName = config.modelName,
                 customEndpoint = config.customEndpoint,
+                proxyBaseUrl = config.proxyBaseUrl,
                 items = eligibleItems,
                 categories = categories,
                 isPro = isPro
             )
             localResults + cloudResults
         } catch (e: Exception) {
-            android.util.Log.e("CloudAiBackendClient", "Gemini batch analysis failed: ${e.message}", e)
+            AppLogger.e("CloudAiBackendClient", "Gemini batch analysis failed: ${e.message}", e)
             if (e.message?.contains("429") == true) {
                 GeminiRateLimiter.reportRateLimitHit()
             }
@@ -464,15 +514,30 @@ object CloudAiBackendClient {
         apiKey: String,
         modelName: String,
         customEndpoint: String,
+        proxyBaseUrl: String,
         items: List<BatchPhotoItem>,
         categories: List<Category>,
         isPro: Boolean = false
     ): Map<String, ParsedScreenshotData> {
-        val urlString = if (customEndpoint.isNotBlank()) {
-            customEndpoint
-        } else {
-            "$GEMINI_BASE_URL/${modelName.trim()}:generateContent"
+        val sanitizedItems = items.mapNotNull { item ->
+            val sanitized = CloudPrivacyGateway.prepareForAnalysis(item.scrubbedText, item.photoTitle, item.visualLabels)
+            if (sanitized.decision == PrivacyDecision.CLOUD_ELIGIBLE) {
+                item.copy(
+                    photoTitle = sanitized.scrubbedTitle,
+                    scrubbedText = sanitized.scrubbedText
+                )
+            } else {
+                null
+            }
         }
+        if (sanitizedItems.isEmpty()) return emptyMap()
+
+        val urlString = resolveEndpointUrl(
+            modelName = modelName,
+            action = "generateContent",
+            customEndpoint = customEndpoint,
+            proxyBaseUrl = proxyBaseUrl
+        ) ?: throw IllegalArgumentException("Invalid or non-HTTPS Cloud AI endpoint")
 
         val effectiveCategories = if (categories.isNotEmpty()) categories else SmartHeuristicParser.DEFAULT_CATEGORIES
         val categoriesList = effectiveCategories.joinToString(", ") { "${it.id}: '${it.name}'" }
@@ -486,7 +551,7 @@ object CloudAiBackendClient {
 
         val delimitedItems = buildString {
             appendLine("INPUT SCREENSHOT ITEMS TO CLASSIFY (ANALYZE EACH BOUNDED ITEM IN STRICT ISOLATION):")
-            for (item in items) {
+            for (item in sanitizedItems) {
                 appendLine("<photo id=\"${item.photoId}\">")
                 appendLine("Original File Title: ${item.photoTitle}")
                 if (item.hasFace) {
@@ -505,6 +570,8 @@ object CloudAiBackendClient {
         val systemInstruction = """
             You are an expert AI assistant that organizes screenshots and photos for users.
             Input consists of screenshot items bounded between '<photo id="..."> ... </photo>'.
+            Placeholders such as [BANK_ACCOUNT], [CREDIT_CARD], [PHONE_NUMBER], [EMAIL_REDACTED], [ID_NUMBER], [PASSPORT_NO], [REDACTED_SECRET] indicate redacted PII.
+            NEVER copy bracketed redaction tokens like [BANK_ACCOUNT], [PHONE_NUMBER], or [EMAIL_REDACTED] into 'suggested_title', 'suggested_event_title', or 'summary'.
             For EACH bounded item in the input, analyze its content independently and return a structured JSON response matching its exact "id".
             
             CRITICAL ISOLATION DIRECTIVE:
@@ -557,17 +624,7 @@ object CloudAiBackendClient {
             put("generationConfig", generationConfig)
         }
 
-        val url = URL(urlString)
-        val conn = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            connectTimeout = CONNECT_TIMEOUT_MS
-            readTimeout = READ_TIMEOUT_MS
-            doOutput = true
-            setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-            if (apiKey.isNotBlank()) {
-                setRequestProperty("x-goog-api-key", apiKey.trim())
-            }
-        }
+        val conn = openHttpsConnection(urlString = urlString, apiKey = apiKey)
 
         OutputStreamWriter(conn.outputStream, "UTF-8").use { writer ->
             writer.write(requestBody.toString())
@@ -587,7 +644,7 @@ object CloudAiBackendClient {
         val responseJsonString = conn.inputStream.bufferedReader().use { it.readText() }
         return parseGeminiBatchResponse(
             responseJson = responseJsonString,
-            items = items,
+            items = sanitizedItems,
             categories = effectiveCategories,
             isPro = isPro
         )
@@ -608,36 +665,43 @@ object CloudAiBackendClient {
     }
 
     /**
-     * Calls Google gemini-embedding-2 batchEmbedContents API to generate multiple 768-dimensional neural vectors
-     * in a SINGLE HTTP request (up to 100 texts at once).
-     * Drastically reduces network calls from N to 1 and avoids 429 rate limits.
+     * Calls Google gemini-embedding-2 batchEmbedContents API (or HTTPS Proxy) to generate multiple 768-dimensional neural vectors
+     * in a SINGLE HTTP request. Enforces [CloudPrivacyGateway] per item.
      */
     suspend fun getBatchEmbeddings(
         texts: List<String>,
-        apiKey: String = CloudAiConfigManager.HARDCODED_API_KEY,
-        modelName: String = CloudAiConfigManager.DEFAULT_EMBEDDING_MODEL,
-        taskType: String = "RETRIEVAL_DOCUMENT"
+        apiKey: String = "",
+        modelName: String = CloudAiDefaults.DEFAULT_EMBEDDING_MODEL,
+        taskType: String = "RETRIEVAL_DOCUMENT",
+        proxyBaseUrl: String = CloudAiDefaults.PROXY_BASE_URL
     ): List<FloatArray?> = withContext(Dispatchers.IO) {
         if (texts.isEmpty()) return@withContext emptyList()
-        val effectiveApiKey = if (apiKey.isNotBlank()) apiKey.trim() else CloudAiConfigManager.HARDCODED_API_KEY.trim()
-        if (effectiveApiKey.isBlank()) return@withContext texts.map { null }
+        val effectiveApiKey = apiKey.trim()
+        val effectiveProxyUrl = proxyBaseUrl.trim()
+        if (effectiveProxyUrl.isBlank() && effectiveApiKey.isBlank()) {
+            return@withContext texts.map { null }
+        }
 
-        // Defense-in-depth: separate LOCAL_ONLY items from CLOUD_ELIGIBLE while preserving original indices
-        val eligibleIndices = mutableListOf<Int>()
+        // Defense-in-depth: scrub & separate LOCAL_ONLY items from CLOUD_ELIGIBLE while preserving original indices
+        val eligibleTargets = mutableListOf<Pair<Int, String>>()
         for (i in texts.indices) {
-            if (PrivacyPolicy.classify(texts[i]) == PrivacyDecision.CLOUD_ELIGIBLE) {
-                eligibleIndices.add(i)
+            val check = CloudPrivacyGateway.prepareTextForEmbedding(texts[i])
+            if (check.isMeaningfulForCloud) {
+                eligibleTargets.add(i to check.scrubbedText)
             }
         }
-        if (eligibleIndices.isEmpty()) return@withContext texts.map { null }
+        if (eligibleTargets.isEmpty()) return@withContext texts.map { null }
 
-        val urlString = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:batchEmbedContents?key=$effectiveApiKey"
+        val urlString = resolveEndpointUrl(
+            modelName = modelName,
+            action = "batchEmbedContents",
+            proxyBaseUrl = effectiveProxyUrl
+        ) ?: return@withContext texts.map { null }
 
         try {
             val requestsArray = JSONArray()
-            for (idx in eligibleIndices) {
-                val text = texts[idx]
-                val cleanText = text.trim().take(2048)
+            for ((_, cleanScrubbed) in eligibleTargets) {
+                val cleanText = cleanScrubbed.take(2048)
                 val reqObj = JSONObject().apply {
                     put("model", "models/$modelName")
                     val contentObj = JSONObject().apply {
@@ -659,14 +723,7 @@ object CloudAiBackendClient {
                 put("requests", requestsArray)
             }
 
-            val url = URL(urlString)
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = CONNECT_TIMEOUT_MS
-                readTimeout = READ_TIMEOUT_MS
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-            }
+            val conn = openHttpsConnection(urlString = urlString, apiKey = effectiveApiKey)
 
             OutputStreamWriter(conn.outputStream, "UTF-8").use { writer ->
                 writer.write(requestBody.toString())
@@ -677,7 +734,7 @@ object CloudAiBackendClient {
             if (responseCode !in 200..299) {
                 val errorStream = conn.errorStream ?: conn.inputStream
                 val errorMsg = errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $responseCode"
-                android.util.Log.e("CloudAiBackendClient", "batchEmbedContents failed ($responseCode) for model $modelName: $errorMsg")
+                AppLogger.e("CloudAiBackendClient", "batchEmbedContents failed ($responseCode) for model $modelName: $errorMsg")
                 if (responseCode == 429) {
                     GeminiRateLimiter.reportRateLimitHit()
                 }
@@ -689,7 +746,8 @@ object CloudAiBackendClient {
             val embeddingsArray = json.optJSONArray("embeddings") ?: return@withContext texts.map { null }
 
             val finalResult = arrayOfNulls<FloatArray>(texts.size).toMutableList()
-            for ((reqOrder, origIdx) in eligibleIndices.withIndex()) {
+            for ((reqOrder, targetPair) in eligibleTargets.withIndex()) {
+                val origIdx = targetPair.first
                 val embObj = embeddingsArray.optJSONObject(reqOrder)
                 val valuesArray = embObj?.optJSONArray("values")
                 if (valuesArray == null || valuesArray.length() == 0) {
@@ -713,32 +771,41 @@ object CloudAiBackendClient {
 
             finalResult
         } catch (e: Exception) {
-            android.util.Log.e("CloudAiBackendClient", "getBatchEmbeddings exception for model $modelName: ${e.message}", e)
+            AppLogger.e("CloudAiBackendClient", "getBatchEmbeddings exception for model $modelName: ${e.message}", e)
             texts.map { null }
         }
     }
 
     /**
-     * Calls Google gemini-embedding-2 API to generate a 768-dimensional dense multimodal/text neural vector.
-     * Fully offloads neural processing to Cloud, zero on-device RAM overhead, preventing background OOM.
+     * Calls Google gemini-embedding-2 API (or HTTPS Proxy) to generate a 768-dimensional neural vector.
+     * Enforces [CloudPrivacyGateway] (fail-closed) before any network call.
      */
     suspend fun getEmbedding(
         text: String,
-        apiKey: String = CloudAiConfigManager.HARDCODED_API_KEY,
-        modelName: String = CloudAiConfigManager.DEFAULT_EMBEDDING_MODEL,
-        taskType: String = "RETRIEVAL_DOCUMENT"
+        apiKey: String = "",
+        modelName: String = CloudAiDefaults.DEFAULT_EMBEDDING_MODEL,
+        taskType: String = "RETRIEVAL_DOCUMENT",
+        proxyBaseUrl: String = CloudAiDefaults.PROXY_BASE_URL
     ): FloatArray? = withContext(Dispatchers.IO) {
         val trimmed = text.trim()
-        val effectiveApiKey = if (apiKey.isNotBlank()) apiKey.trim() else CloudAiConfigManager.HARDCODED_API_KEY.trim()
-        if (trimmed.isBlank() || effectiveApiKey.isBlank()) return@withContext null
-
-        // Privacy Gate Check
-        if (PrivacyPolicy.classify(trimmed) == PrivacyDecision.LOCAL_ONLY) {
+        val effectiveApiKey = apiKey.trim()
+        val effectiveProxyUrl = proxyBaseUrl.trim()
+        if (trimmed.isBlank() || (effectiveProxyUrl.isBlank() && effectiveApiKey.isBlank())) {
             return@withContext null
         }
 
-        val cleanText = trimmed.take(2048) // Safe input size
-        val urlString = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:embedContent?key=$effectiveApiKey"
+        // Privacy Gate Check via CloudPrivacyGateway
+        val check = CloudPrivacyGateway.prepareTextForEmbedding(trimmed)
+        if (!check.isMeaningfulForCloud) {
+            return@withContext null
+        }
+
+        val cleanText = check.scrubbedText.take(2048) // Safe input size
+        val urlString = resolveEndpointUrl(
+            modelName = modelName,
+            action = "embedContent",
+            proxyBaseUrl = effectiveProxyUrl
+        ) ?: return@withContext null
 
         try {
             GeminiRateLimiter.acquire()
@@ -757,14 +824,7 @@ object CloudAiBackendClient {
                 }
             }
 
-            val url = URL(urlString)
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = CONNECT_TIMEOUT_MS
-                readTimeout = READ_TIMEOUT_MS
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-            }
+            val conn = openHttpsConnection(urlString = urlString, apiKey = effectiveApiKey)
 
             OutputStreamWriter(conn.outputStream, "UTF-8").use { writer ->
                 writer.write(requestBody.toString())
@@ -775,7 +835,7 @@ object CloudAiBackendClient {
             if (responseCode !in 200..299) {
                 val errorStream = conn.errorStream ?: conn.inputStream
                 val errorMsg = errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $responseCode"
-                android.util.Log.e("CloudAiBackendClient", "getEmbedding failed ($responseCode) for model $modelName: $errorMsg")
+                AppLogger.e("CloudAiBackendClient", "getEmbedding failed ($responseCode) for model $modelName: $errorMsg")
                 if (responseCode == 429) {
                     GeminiRateLimiter.reportRateLimitHit()
                 }
@@ -787,13 +847,13 @@ object CloudAiBackendClient {
             val embeddingObj = json.optJSONObject("embedding")
                 ?: json.optJSONArray("embeddings")?.optJSONObject(0)
             if (embeddingObj == null) {
-                android.util.Log.e("CloudAiBackendClient", "getEmbedding: Missing 'embedding' object in response: $responseText")
+                AppLogger.e("CloudAiBackendClient", "getEmbedding: Missing 'embedding' object in response: $responseText")
                 return@withContext null
             }
 
             val valuesArray = embeddingObj.optJSONArray("values")
             if (valuesArray == null || valuesArray.length() == 0) {
-                android.util.Log.e("CloudAiBackendClient", "getEmbedding: Missing or empty 'values' array in response")
+                AppLogger.e("CloudAiBackendClient", "getEmbedding: Missing or empty 'values' array in response")
                 return@withContext null
             }
 
@@ -811,41 +871,59 @@ object CloudAiBackendClient {
             }
             vector
         } catch (e: Exception) {
-            android.util.Log.e("CloudAiBackendClient", "getEmbedding exception for model $modelName: ${e.message}", e)
+            AppLogger.e("CloudAiBackendClient", "getEmbedding exception for model $modelName: ${e.message}", e)
             null
         }
     }
 
     /**
-     * Diagnostic method to test connection and validate Gemini API Key.
-     */
-    data class PhotoCandidateSnippet(
-        val id: String,
-        val title: String,
-        val textSnippet: String
-    )
-
-    /**
      * Targeted AI Verification for Custom Categories.
-     * Evaluates a small pre-filtered batch of candidate photos (2-8 items) against a user's custom category in a single request.
-     * Guarantees 100% parity with manual scan without multi-photo latency.
+     * Evaluates a small pre-filtered batch of CLOUD_ELIGIBLE candidate photos against a user's custom category.
+     * Enforces [CloudPrivacyGateway] (fail-closed) on category name, candidate titles, and text snippets.
      */
     suspend fun verifyCustomCategoryCandidates(
         category: Category,
-        candidates: List<PhotoCandidateSnippet>,
-        apiKey: String,
-        modelName: String = CloudAiConfigManager.DEFAULT_MODEL
+        candidates: List<CategoryCandidateSnippet>,
+        apiKey: String = "",
+        modelName: String = CloudAiDefaults.DEFAULT_MODEL,
+        proxyBaseUrl: String = CloudAiDefaults.PROXY_BASE_URL
     ): List<String> = withContext(Dispatchers.IO) {
-        val effectiveApiKey = if (apiKey.isNotBlank()) apiKey.trim() else CloudAiConfigManager.HARDCODED_API_KEY.trim()
-        if (effectiveApiKey.isBlank() || candidates.isEmpty()) return@withContext emptyList()
+        val effectiveApiKey = apiKey.trim()
+        val effectiveProxyUrl = proxyBaseUrl.trim()
+        if ((effectiveProxyUrl.isBlank() && effectiveApiKey.isBlank()) || candidates.isEmpty()) {
+            return@withContext emptyList()
+        }
 
-        val urlString = "$GEMINI_BASE_URL/${modelName.trim()}:generateContent"
+        val safeCategoryName = CloudPrivacyGateway.sanitizeCategoryName(category.name)
+        val safeCandidates = candidates.mapNotNull { candidate ->
+            val sanitized = CloudPrivacyGateway.prepareForAnalysis(
+                rawOrScrubbedText = candidate.textSnippet,
+                photoTitle = candidate.title
+            )
+            if (sanitized.decision == PrivacyDecision.CLOUD_ELIGIBLE) {
+                CategoryCandidateSnippet(
+                    id = candidate.id,
+                    title = sanitized.scrubbedTitle,
+                    textSnippet = sanitized.scrubbedText
+                )
+            } else {
+                null
+            }
+        }
+        if (safeCandidates.isEmpty()) return@withContext emptyList()
+
+        val urlString = resolveEndpointUrl(
+            modelName = modelName,
+            action = "generateContent",
+            proxyBaseUrl = effectiveProxyUrl
+        ) ?: return@withContext emptyList()
+
         val systemInstruction = """
             You are an expert AI photo organizer. The user has created a CUSTOM CATEGORY:
-            ID: "${category.id}", Name: "${category.name}"
+            ID: "${category.id}", Name: "$safeCategoryName"
 
-            Analyze the candidate photos below (IDs, titles, and extracted OCR text snippets).
-            Determine which photo IDs genuinely belong to the user's custom category "${category.name}".
+            Analyze the candidate photos below (IDs, titles, and pre-scrubbed OCR text snippets).
+            Determine which photo IDs genuinely belong to the user's custom category "$safeCategoryName".
             Understand true semantic intent, topic, brand, and purpose (e.g. if category is 'Shopee', include Shopee orders or packages; if 'Lego', include Lego bricks, sets, or builds).
             Do NOT include casual chat mentions, noise, or unrelated documents.
 
@@ -856,8 +934,8 @@ object CloudAiBackendClient {
         """.trimIndent()
 
         val candidatesText = buildString {
-            append("User Custom Category: \"").append(category.name).append("\"\n\nCandidates:\n")
-            for (c in candidates) {
+            append("User Custom Category: \"").append(safeCategoryName).append("\"\n\nCandidates:\n")
+            for (c in safeCandidates) {
                 append("[ID: ").append(c.id).append("] Title: ").append(c.title)
                 append(" | Text: ").append(c.textSnippet.take(300).replace("\n", " "))
                 append("\n")
@@ -885,15 +963,7 @@ object CloudAiBackendClient {
                 put("generationConfig", generationConfig)
             }
 
-            val url = URL(urlString)
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = CONNECT_TIMEOUT_MS
-                readTimeout = READ_TIMEOUT_MS
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                setRequestProperty("x-goog-api-key", effectiveApiKey)
-            }
+            val conn = openHttpsConnection(urlString = urlString, apiKey = effectiveApiKey)
 
             OutputStreamWriter(conn.outputStream, "UTF-8").use { writer ->
                 writer.write(requestBody.toString())
@@ -924,25 +994,27 @@ object CloudAiBackendClient {
             }
             emptyList()
         } catch (e: Exception) {
-            android.util.Log.e("CloudAiBackendClient", "verifyCustomCategoryCandidates failed: ${e.message}", e)
+            AppLogger.e("CloudAiBackendClient", "verifyCustomCategoryCandidates failed: ${e.message}", e)
             emptyList()
         }
     }
 
     suspend fun testConnection(
         apiKey: String,
-        modelName: String = CloudAiConfigManager.DEFAULT_MODEL,
-        customEndpoint: String = ""
+        modelName: String = CloudAiDefaults.DEFAULT_MODEL,
+        customEndpoint: String = "",
+        proxyBaseUrl: String = CloudAiDefaults.PROXY_BASE_URL
     ): Result<String> = withContext(Dispatchers.IO) {
-        if (apiKey.isBlank() && customEndpoint.isBlank()) {
-            return@withContext Result.failure(IllegalArgumentException("Please enter an API key first."))
+        if (apiKey.isBlank() && customEndpoint.isBlank() && proxyBaseUrl.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Cloud AI Proxy or API key is not configured."))
         }
         try {
-            val urlString = if (customEndpoint.isNotBlank()) {
-                customEndpoint
-            } else {
-                "$GEMINI_BASE_URL/${modelName.trim()}:generateContent"
-            }
+            val urlString = resolveEndpointUrl(
+                modelName = modelName,
+                action = "generateContent",
+                customEndpoint = customEndpoint,
+                proxyBaseUrl = proxyBaseUrl
+            ) ?: return@withContext Result.failure(IllegalArgumentException("Endpoint must use HTTPS."))
 
             val requestBody = JSONObject().apply {
                 val contentsArray = JSONArray().apply {
@@ -960,16 +1032,12 @@ object CloudAiBackendClient {
                 })
             }
 
-            val conn = (URL(urlString).openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = 8_000
-                readTimeout = 8_000
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                if (apiKey.isNotBlank()) {
-                    setRequestProperty("x-goog-api-key", apiKey.trim())
-                }
-            }
+            val conn = openHttpsConnection(
+                urlString = urlString,
+                apiKey = apiKey,
+                connectTimeoutMs = 8_000,
+                readTimeoutMs = 8_000
+            )
 
             OutputStreamWriter(conn.outputStream, "UTF-8").use { it.write(requestBody.toString()) }
 
@@ -999,14 +1067,13 @@ object CloudAiBackendClient {
             return@withContext Result.failure(IllegalArgumentException("Please enter an API key first."))
         }
         try {
-            val url = URL(GEMINI_BASE_URL)
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 8_000
-                readTimeout = 8_000
-                setRequestProperty("x-goog-api-key", apiKey.trim())
-                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-            }
+            val conn = openHttpsConnection(
+                urlString = GEMINI_BASE_URL,
+                apiKey = apiKey,
+                method = "GET",
+                connectTimeoutMs = 8_000,
+                readTimeoutMs = 8_000
+            )
 
             val code = conn.responseCode
             if (code in 200..299) {

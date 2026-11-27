@@ -3,7 +3,7 @@ package com.example.test2.services
 import android.content.ContentUris
 import android.content.Context
 import android.provider.MediaStore
-import com.example.test2.database.AppDatabaseHelper
+import com.example.test2.di.AppModule
 import com.example.test2.storage.DeviceMediaScanner
 import com.example.test2.util.AppLogger
 import kotlinx.coroutines.Dispatchers
@@ -37,7 +37,7 @@ object ScreenshotDetectionManager {
      * Drained asynchronously and reliably by ScreenshotQueueWorker.
      */
     suspend fun enqueueNewScreenshots(context: Context): Int = withContext(Dispatchers.IO) {
-        val dbHelper = AppDatabaseHelper.getInstance(context)
+        val queueDao = AppModule.provideScreenshotQueueDao(AppModule.provideAppDatabaseHelper(context))
         val projection = arrayOf(
             MediaStore.Images.Media._ID,
             MediaStore.Images.Media.DISPLAY_NAME,
@@ -92,7 +92,7 @@ object ScreenshotDetectionManager {
                     val isRecent = dateAddedMillis >= cutoffMillis
                     val photoId = "device_$id"
 
-                    if (isScreenshot && isRecent && !dbHelper.isScreenshotProcessedOrNotified(photoId)) {
+                    if (isScreenshot && isRecent && !queueDao.isScreenshotProcessedOrNotified(photoId)) {
                         val contentUri = ContentUris.withAppendedId(
                             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
                             id
@@ -100,7 +100,7 @@ object ScreenshotDetectionManager {
 
                         // Distinguish live real-time capture (within 3 minutes of now) vs historical 24h backfill
                         val isLive = kotlin.math.abs(now - dateAddedMillis) <= 3 * 60 * 1000L
-                        val enqueued = dbHelper.enqueueScreenshot(
+                        val enqueued = queueDao.enqueueScreenshot(
                             photoId = photoId,
                             filePath = contentUri,
                             dateAdded = dateAddedMillis,

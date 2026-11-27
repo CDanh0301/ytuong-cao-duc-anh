@@ -4,8 +4,10 @@ import com.example.test2.shared.models.ActionCardType
 import com.example.test2.shared.models.AgingSettings
 import com.example.test2.shared.models.AppData
 import com.example.test2.shared.models.Category
+import com.example.test2.shared.models.DefaultCategories
 import com.example.test2.shared.models.Folder
 import com.example.test2.shared.models.Photo
+import com.example.test2.shared.models.PhotoComparators
 import com.example.test2.shared.models.PhotoFilter
 import com.example.test2.shared.models.SortOption
 import com.example.test2.shared.models.UserAccountTier
@@ -54,33 +56,17 @@ data class PhotoAiMetadataUpdate(
 
 class PhotoRepository(
     private val persistenceDriver: PersistenceDriver = InMemoryPersistenceDriver(),
-    private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default)
+    private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default),
+    private val onError: (String, Throwable) -> Unit = { _, _ -> }
 ) : IPhotoRepository {
     companion object {
-        private fun normalizedTitleKey(photo: Photo): String =
-            photo.title.trim().lowercase()
-
-        private fun normalizedFileNameKey(photo: Photo): String =
-            photo.fileName.removeSuffix(".enc").trim().lowercase()
-
         /**
          * Canonical chronological descending comparator shared across gallery filtering,
          * device MediaStore sync, vault additions, and restore roundtrips.
-         * Deterministic tie-breakers avoid dependency on storage state (.enc vs content://) or list append order.
          */
-        val chronologicalDescComparator: Comparator<Photo> = Comparator { a, b ->
-            val dateCmp = b.dateAdded.compareTo(a.dateAdded)
-            if (dateCmp != 0) return@Comparator dateCmp
-            val titleCmp = normalizedTitleKey(b).compareTo(normalizedTitleKey(a))
-            if (titleCmp != 0) return@Comparator titleCmp
-            val fileCmp = normalizedFileNameKey(b).compareTo(normalizedFileNameKey(a))
-            if (fileCmp != 0) return@Comparator fileCmp
-            b.id.compareTo(a.id)
-        }
+        val chronologicalDescComparator: Comparator<Photo> = PhotoComparators.chronologicalDescComparator
 
-        val chronologicalAscComparator: Comparator<Photo> = Comparator { a, b ->
-            chronologicalDescComparator.compare(b, a)
-        }
+        val chronologicalAscComparator: Comparator<Photo> = PhotoComparators.chronologicalAscComparator
     }
 
     private val json = Json {
@@ -167,18 +153,40 @@ class PhotoRepository(
                     }.ifEmpty { defaultFoldersList() }
 
                     val legacyCatNames = mapOf(
-                        "cat_events" to "Lịch & Sự kiện",
-                        "cat_tobuy" to "Cần mua & Chi tiêu",
-                        "cat_reading" to "Đọc & Tham khảo",
-                        "cat_nature" to "Thiên nhiên & Phong cảnh",
-                        "cat_personal" to "Cá nhân & Giấy tờ"
+                        DefaultCategories.EVENTS to "Lịch & Sự kiện",
+                        DefaultCategories.TO_BUY to "Cần mua & Chi tiêu",
+                        DefaultCategories.READING to "Đọc & Tham khảo",
+                        DefaultCategories.NATURE to "Thiên nhiên & Phong cảnh",
+                        DefaultCategories.PERSONAL to "Cá nhân & Giấy tờ"
                     )
+                    val legacyCatVisuals = mapOf(
+                        DefaultCategories.EVENTS to ("#3B82F6" to "plane"),
+                        DefaultCategories.TO_BUY to ("#F59E0B" to "utensils"),
+                        DefaultCategories.READING to ("#8B5CF6" to "tag"),
+                        DefaultCategories.NATURE to ("#009688" to "leaf"),
+                        DefaultCategories.PERSONAL to ("#EC4899" to "user")
+                    )
+                    val newCatVisuals = defaultCategoriesList().associateBy { it.id }
+                    var didMigrateCategoryVisuals = false
                     val loadedCategories = appData.categories.map { cat ->
-                        if (cat.id in legacyCatNames && cat.name in listOf("Events & Schedule", "To-Buy", "Tasks & To-Do", "Reading List", "Nature", "Personal")) {
+                        var migrated = if (cat.id in legacyCatNames && cat.name in listOf("Events & Schedule", "To-Buy", "Tasks & To-Do", "Reading List", "Nature", "Personal")) {
                             cat.copy(name = legacyCatNames[cat.id] ?: cat.name)
                         } else {
                             cat
                         }
+                        val legacyVisual = legacyCatVisuals[migrated.id]
+                        val targetVisual = newCatVisuals[migrated.id]
+                        if (legacyVisual != null && targetVisual != null &&
+                            migrated.colorHex.equals(legacyVisual.first, ignoreCase = true) &&
+                            migrated.iconName.equals(legacyVisual.second, ignoreCase = true)
+                        ) {
+                            didMigrateCategoryVisuals = true
+                            migrated = migrated.copy(
+                                colorHex = targetVisual.colorHex,
+                                iconName = targetVisual.iconName
+                            )
+                        }
+                        migrated
                     }.filterNot { it.id == "cat_tasks" }.toMutableList()
 
                     val existingIds = loadedCategories.map { it.id }.toSet()
@@ -190,10 +198,14 @@ class PhotoRepository(
                     _categories.value = loadedCategories
                     _accountTier.value = appData.accountTier
                     _agingSettings.value = appData.agingSettings
+                    if (didMigrateCategoryVisuals) {
+                        persistData()
+                    }
                     if (nowMillis > 0L) {
                         checkMonthlyQuotaReset(nowMillis)
                     }
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    onError("Failed decoding persisted metadata; seeding defaults", e)
                     seedDefaults(nowMillis)
                 }
             } else {
@@ -216,11 +228,11 @@ class PhotoRepository(
 
     private fun defaultCategoriesList(): List<Category> {
         return listOf(
-            Category(id = "cat_events", name = "Lịch & Sự kiện", colorHex = "#3B82F6", iconName = "plane", createdAt = 1000L),
-            Category(id = "cat_tobuy", name = "Cần mua & Chi tiêu", colorHex = "#F59E0B", iconName = "utensils", createdAt = 2000L),
-            Category(id = "cat_reading", name = "Đọc & Tham khảo", colorHex = "#8B5CF6", iconName = "tag", createdAt = 3000L),
-            Category(id = "cat_nature", name = "Thiên nhiên & Phong cảnh", colorHex = "#009688", iconName = "leaf", createdAt = 4000L),
-            Category(id = "cat_personal", name = "Cá nhân & Giấy tờ", colorHex = "#EC4899", iconName = "user", createdAt = 5000L)
+            Category(id = DefaultCategories.EVENTS, name = "Lịch & Sự kiện", colorHex = "#1E4240", iconName = "tag", createdAt = 1000L),
+            Category(id = DefaultCategories.TO_BUY, name = "Cần mua & Chi tiêu", colorHex = "#B89054", iconName = "utensils", createdAt = 2000L),
+            Category(id = DefaultCategories.READING, name = "Đọc & Tham khảo", colorHex = "#7E8D78", iconName = "building", createdAt = 3000L),
+            Category(id = DefaultCategories.NATURE, name = "Thiên nhiên & Phong cảnh", colorHex = "#5A7364", iconName = "leaf", createdAt = 4000L),
+            Category(id = DefaultCategories.PERSONAL, name = "Cá nhân & Giấy tờ", colorHex = "#7A5C7E", iconName = "user", createdAt = 5000L)
         )
     }
 
@@ -246,7 +258,8 @@ class PhotoRepository(
             try {
                 val encoded = json.encodeToString(AppData.serializer(), appData)
                 persistenceDriver.saveData(encoded)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                onError("Failed persisting app metadata", e)
             }
         }
     }
@@ -414,7 +427,6 @@ class PhotoRepository(
     override fun updatePhotoAiMetadataBatch(updates: List<PhotoAiMetadataUpdate>) {
         if (updates.isEmpty()) return
         val updateMap = updates.associateBy { it.photoId }
-        val defaultCatIds = setOf("cat_events", "cat_tobuy", "cat_reading", "cat_nature", "cat_personal")
 
         _photos.value = _photos.value.map { photo ->
             val update = updateMap[photo.id]
@@ -441,14 +453,21 @@ class PhotoRepository(
                     update.detectedIntent ?: photo.detectedIntent
                 }
 
-                val updatedCategories = if (isForced || (update.targetCategoryId != null && (!isAlreadyCloudEnriched || update.targetCategoryId != "cat_other"))) {
-                    if (update.targetCategoryId != null) {
-                        (photo.categoryIds.filterNot { it in defaultCatIds } + update.targetCategoryId).toSet()
-                    } else {
-                        photo.categoryIds
-                    }
+                val shouldPreserveUserCategories = photo.isCategoryUserModified && !isForced
+                val canApplyAiCategory = !shouldPreserveUserCategories &&
+                        update.targetCategoryId != null &&
+                        (isForced || !isAlreadyCloudEnriched || update.targetCategoryId != "cat_other")
+
+                val updatedCategories = if (canApplyAiCategory) {
+                    setOf(update.targetCategoryId!!)
                 } else {
                     photo.categoryIds
+                }
+
+                val updatedUserModified = if (isForced && update.targetCategoryId != null) {
+                    false
+                } else {
+                    photo.isCategoryUserModified
                 }
 
                 val mergedTags = if (update.semanticTags.isNotEmpty()) {
@@ -474,7 +493,8 @@ class PhotoRepository(
                     suggestedEventDescription = resolvedDescription,
                     semanticTags = mergedTags,
                     categoryIds = updatedCategories,
-                    isProcessed = update.isProcessed || photo.isProcessed
+                    isProcessed = update.isProcessed || photo.isProcessed,
+                    isCategoryUserModified = updatedUserModified
                 )
             } else {
                 photo
@@ -530,8 +550,8 @@ class PhotoRepository(
     }
 
 
-    // Aging Housekeeping: find screenshots older than X days (default 30 days)
-    // Pro Tier allows Custom Aging Rules per category (IDEA.md Part 3)
+    // Aging Housekeeping: find screenshots older than configured retention days (default 30 days).
+    // Pro Tier allows Custom Aging Rules (default days override and per-category retention rules).
     override fun getAgingPhotos(daysOld: Int, nowMillis: Long): List<Photo> {
         if (daysOld <= 0 || nowMillis <= 0L) return emptyList()
         val customRules = _agingSettings.value.categoryRetentionDays
@@ -539,22 +559,25 @@ class PhotoRepository(
 
         return _photos.value.filter { photo ->
             if (!photo.isScreenshot) return@filter false
-            val isAutoArchived = _agingSettings.value.autoArchiveProcessed &&
-                photo.isProcessed &&
-                photo.suggestedEventDateMillis != null &&
-                photo.suggestedEventDateMillis < nowMillis
-
             val effectiveDays = if (isPro && customRules.isNotEmpty()) {
                 photo.categoryIds.firstNotNullOfOrNull { customRules[it] } ?: daysOld
             } else {
                 daysOld
             }
             val cutoff = nowMillis - (effectiveDays * 24L * 60L * 60L * 1000L)
-            photo.dateAdded < cutoff || isAutoArchived
+            photo.dateAdded < cutoff
         }
     }
 
+    override fun setDefaultRetentionDays(retentionDays: Int): Boolean {
+        if (!_accountTier.value.isPro || retentionDays <= 0) return false
+        _agingSettings.value = _agingSettings.value.copy(retentionDays = retentionDays)
+        persistData()
+        return true
+    }
+
     override fun setCategoryRetentionRule(categoryId: String, retentionDays: Int) {
+        if (!_accountTier.value.isPro) return
         val updatedMap = _agingSettings.value.categoryRetentionDays.toMutableMap()
         if (retentionDays > 0) {
             updatedMap[categoryId] = retentionDays
@@ -691,7 +714,8 @@ class PhotoRepository(
         isFavorite: Boolean,
         isScreenshot: Boolean,
         dateAdded: Long,
-        fileSizeBytes: Long
+        fileSizeBytes: Long,
+        isCategoryUserModified: Boolean
     ): Photo {
         val targetFolderId = folderId
             ?: _folders.value.firstOrNull { it.id == "folder_screenshots" || it.name.contains("màn hình", ignoreCase = true) }?.id
@@ -709,7 +733,8 @@ class PhotoRepository(
             isFavorite = isFavorite,
             isScreenshot = isScreenshot,
             dateAdded = dateAdded,
-            fileSizeBytes = fileSizeBytes
+            fileSizeBytes = fileSizeBytes,
+            isCategoryUserModified = isCategoryUserModified
         )
         _photos.value = listOf(photo) + _photos.value
         persistData()
@@ -741,12 +766,14 @@ class PhotoRepository(
         var updatedPhoto: Photo? = null
         _photos.value = _photos.value.map { photo ->
             if (photo.id == photoId) {
+                val categoryChanged = categoryIds != photo.categoryIds
                 val updated = photo.copy(
                     title = title,
                     description = description,
                     folderId = folderId,
                     categoryIds = categoryIds,
-                    isFavorite = isFavorite ?: photo.isFavorite
+                    isFavorite = isFavorite ?: photo.isFavorite,
+                    isCategoryUserModified = if (categoryChanged) true else photo.isCategoryUserModified
                 )
                 updatedPhoto = updated
                 updated
@@ -893,7 +920,10 @@ class PhotoRepository(
 
         _photos.value = _photos.value.map { photo ->
             if (categoryId in photo.categoryIds) {
-                photo.copy(categoryIds = photo.categoryIds - categoryId)
+                photo.copy(
+                    categoryIds = photo.categoryIds - categoryId,
+                    isCategoryUserModified = true
+                )
             } else {
                 photo
             }
@@ -921,7 +951,10 @@ class PhotoRepository(
         _photos.value = _photos.value.map { photo ->
             if (photo.id in targetIdSet && categoryId !in photo.categoryIds) {
                 updatedCount++
-                photo.copy(categoryIds = photo.categoryIds + categoryId)
+                photo.copy(
+                    categoryIds = photo.categoryIds + categoryId,
+                    isCategoryUserModified = true
+                )
             } else {
                 photo
             }
@@ -967,7 +1000,8 @@ class PhotoRepository(
                     suggestedEventTitle = photo.suggestedEventTitle,
                     suggestedEventDateMillis = photo.suggestedEventDateMillis,
                     suggestedEventDescription = photo.suggestedEventDescription,
-                    hasReminderCreated = photo.hasReminderCreated
+                    hasReminderCreated = photo.hasReminderCreated,
+                    isCategoryUserModified = true
                 )
             } else {
                 photo

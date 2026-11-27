@@ -3,16 +3,15 @@ package com.example.test2.services
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.net.Uri
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.example.test2.ai.BatchPhotoItem
-import com.example.test2.ai.CloudAiConfigManager
 import com.example.test2.ai.CloudAiSyncNotifier
+import com.example.test2.data.local.prefs.CloudAiDefaults
+import com.example.test2.data.remote.BatchPhotoItem
 import com.example.test2.ai.LocalActionCardExtractor
 import com.example.test2.ai.LocalImageLabeler
 import com.example.test2.ai.MlKitOcrEngine
@@ -65,7 +64,8 @@ class ScreenshotQueueWorker(
                     ExistingWorkPolicy.APPEND_OR_REPLACE,
                     request
                 )
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                AppLogger.w("ScreenshotQueueWorker", "Failed to enqueue worker", e)
             }
         }
     }
@@ -132,7 +132,7 @@ class ScreenshotQueueWorker(
             val vaultManager = AppModule.provideVaultManager(context)
             val geminiApiService = AppModule.provideGeminiApiService(context)
             val isOnline = isNetworkAvailable(context)
-            val canUseCloud = isOnline && aiConfig.isEnabled && aiConfig.apiKey.isNotBlank()
+            val canUseCloud = isOnline && aiConfig.isCloudReady()
 
             // Pre-process items: Junk filter, ML Kit Vision & OCR
             data class PreprocessedItem(
@@ -156,8 +156,8 @@ class ScreenshotQueueWorker(
 
                 // If Privacy Vault mode is active and screenshot is eligible for auto-vault, seamlessly move and encrypt
                 if (vaultManager.shouldAutoVaultPhoto(item.photoId, item.dateAdded) && !currentFilePath.endsWith(".enc")) {
-                    val uri = if (currentFilePath.startsWith("content://")) Uri.parse(currentFilePath) else null
-                    val vaultResult = vaultManager.vaultAndEvictScreenshot(uri, currentFilePath, currentFileName)
+                    val uriStr = if (currentFilePath.startsWith("content://")) currentFilePath else null
+                    val vaultResult = vaultManager.vaultAndEvictScreenshot(uriStr, currentFilePath, currentFileName)
                     if (vaultResult != null) {
                         currentFilePath = vaultResult.newFilePath
                         currentFileName = vaultResult.newFileName
@@ -213,7 +213,9 @@ class ScreenshotQueueWorker(
                     actionCardDao.replaceActionCardsForPhoto(item.photoId, actionCards)
                 }
 
-                val piiResult = onDeviceResult?.let { PiiScrubResult(it.scrubbedText, false) } ?: PiiScrubber.scrub(rawOcrText)
+                val piiResult = onDeviceResult?.let {
+                    PiiScrubResult(it.scrubbedText, it.hasPiiRedacted)
+                } ?: PiiScrubber.scrub(rawOcrText)
                 val scrubbedText = piiResult.scrubbedText
 
                 queueDao.updateQueueItemState(
@@ -293,12 +295,12 @@ class ScreenshotQueueWorker(
                 // Get parsed data from Cloud results or on-device SmartHeuristicParser
                 val parsed = if (prep.needsCloudAnalysis && cloudResults.containsKey(item.photoId)) {
                     val res = cloudResults[item.photoId]!!
-                    if (!res.isCloudEnriched && aiConfig.isEnabled && aiConfig.apiKey.isNotBlank()) {
+                    if (!res.isCloudEnriched && aiConfig.isCloudReady()) {
                         hasCloudUpgradePending = true
                     }
                     res
                 } else {
-                    if (aiConfig.isEnabled && aiConfig.apiKey.isNotBlank() && prep.needsCloudAnalysis) {
+                    if (aiConfig.isCloudReady() && prep.needsCloudAnalysis) {
                         hasCloudUpgradePending = true
                     }
                     SmartHeuristicParser.parse(
@@ -326,7 +328,8 @@ class ScreenshotQueueWorker(
                     append(scrubbedText)
                 }.trim()
 
-                // Save processed screenshot record
+                // Save processed screenshot record (DAO preserves existing target_category_id if is_user_categorized == 1)
+                val effectiveCategoryId = if (item.isUserCategorized) item.targetCategoryId else parsed.targetCategoryId
                 queueDao.recordProcessedScreenshot(
                     photoId = item.photoId,
                     filePath = prep.filePath,
@@ -335,7 +338,7 @@ class ScreenshotQueueWorker(
                     detectedIntent = parsed.detectedIntent,
                     eventTitle = parsed.suggestedEventTitle,
                     eventDateMillis = parsed.suggestedEventDateMillis,
-                    targetCategoryId = parsed.targetCategoryId,
+                    targetCategoryId = effectiveCategoryId,
                     status = QueueStatus.PROCESSING.name,
                     eventDescription = parsed.suggestedEventDescription,
                     summary = summary,
@@ -345,7 +348,7 @@ class ScreenshotQueueWorker(
                 )
 
                 // Index in FTS5
-                val categoryDisplayName = userCategories.firstOrNull { it.id == parsed.targetCategoryId }?.name ?: parsed.targetCategoryId ?: ""
+                val categoryDisplayName = userCategories.firstOrNull { it.id == effectiveCategoryId }?.name ?: effectiveCategoryId ?: ""
                 val cardKeywords = prep.actionCards.joinToString(" ") { "${it.title} ${it.subtitle ?: ""}" }
                 val combinedEntities = if (entitiesStr.isNotBlank() && cardKeywords.isNotBlank()) {
                     "$entitiesStr $cardKeywords"
@@ -371,15 +374,19 @@ class ScreenshotQueueWorker(
                     text = fullSemanticDoc,
                     title = parsed.suggestedEventTitle ?: title,
                     intent = parsed.detectedIntent,
-                    categoryNames = if (!parsed.targetCategoryId.isNullOrBlank()) listOf(categoryDisplayName) else emptyList(),
+                    categoryNames = if (!effectiveCategoryId.isNullOrBlank()) listOf(categoryDisplayName) else emptyList(),
                     customCategories = userCategories
                 )
                 vectorDao.savePhotoVector(item.photoId, localEmbedding, parsed.detectedIntent)
 
-                // Enqueue for batch embedding ONLY if cloud is allowed for this item
-                val itemPrivacy = PrivacyPolicy.classify(scrubbedText, title, visualAnalysis.rawLabels)
-                if (itemPrivacy == PrivacyDecision.CLOUD_ELIGIBLE && fullSemanticDoc.isNotBlank()) {
-                    embeddingTextsToGenerate.add(EmbeddingTarget(item.photoId, fullSemanticDoc))
+                // Enqueue for batch embedding ONLY if CloudPrivacyGateway allows this item
+                val fullDocPrivacy = com.example.test2.ai.CloudPrivacyGateway.prepareTextForEmbedding(
+                    text = fullSemanticDoc,
+                    photoTitle = title,
+                    visualLabels = visualAnalysis.rawLabels
+                )
+                if (fullDocPrivacy.isMeaningfulForCloud) {
+                    embeddingTextsToGenerate.add(EmbeddingTarget(item.photoId, fullDocPrivacy.scrubbedText))
                 }
 
                 // Push notifications ONLY for genuine EVENT or SHOPPING and ONLY if this was a live capture
@@ -408,7 +415,7 @@ class ScreenshotQueueWorker(
                     val vectors = geminiApiService.getBatchEmbeddings(
                         texts = texts,
                         apiKey = aiConfig.apiKey,
-                        modelName = CloudAiConfigManager.DEFAULT_EMBEDDING_MODEL,
+                        modelName = CloudAiDefaults.DEFAULT_EMBEDDING_MODEL,
                         taskType = "RETRIEVAL_DOCUMENT"
                     )
 
@@ -424,7 +431,7 @@ class ScreenshotQueueWorker(
                     if (vectorsToSave.isNotEmpty()) {
                         vectorDao.savePhotoNeuralVectorsBatch(
                             vectors = vectorsToSave,
-                            modelName = CloudAiConfigManager.DEFAULT_EMBEDDING_MODEL,
+                            modelName = CloudAiDefaults.DEFAULT_EMBEDDING_MODEL,
                             modelVersion = "1.0"
                         )
                     }

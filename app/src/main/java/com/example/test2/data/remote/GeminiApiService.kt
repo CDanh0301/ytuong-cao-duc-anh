@@ -1,12 +1,11 @@
 package com.example.test2.data.remote
 
-import com.example.test2.ai.BatchPhotoItem
-import com.example.test2.ai.CloudAiConfigManager
-import com.example.test2.ai.ParsedScreenshotData
+import com.example.test2.data.local.prefs.CloudAiDefaults
 import com.example.test2.shared.models.Category
 
 /**
- * Remote service interface abstracting Gemini Generative Language and Embedding APIs.
+ * Remote service interface abstracting Gemini Generative Language and Embedding APIs
+ * via [CloudAiBackendClient] and [com.example.test2.ai.CloudPrivacyGateway].
  */
 interface GeminiApiService {
     suspend fun analyzeWithFallback(
@@ -26,15 +25,22 @@ interface GeminiApiService {
 
     suspend fun getEmbedding(
         text: String,
-        apiKey: String = CloudAiConfigManager.HARDCODED_API_KEY,
-        modelName: String = CloudAiConfigManager.DEFAULT_EMBEDDING_MODEL,
+        apiKey: String = "",
+        modelName: String = CloudAiDefaults.DEFAULT_EMBEDDING_MODEL,
         taskType: String = "RETRIEVAL_DOCUMENT"
     ): FloatArray?
 
     suspend fun getBatchEmbeddings(
         texts: List<String>,
-        apiKey: String = CloudAiConfigManager.HARDCODED_API_KEY,
-        modelName: String = CloudAiConfigManager.DEFAULT_EMBEDDING_MODEL,
+        apiKey: String = "",
+        modelName: String = CloudAiDefaults.DEFAULT_EMBEDDING_MODEL,
         taskType: String = "RETRIEVAL_DOCUMENT"
     ): List<FloatArray?>
+
+    suspend fun verifyCustomCategoryCandidates(
+        category: Category,
+        candidates: List<CategoryCandidateSnippet>,
+        apiKey: String = "",
+        modelName: String = CloudAiDefaults.DEFAULT_MODEL
+    ): List<String>
 }

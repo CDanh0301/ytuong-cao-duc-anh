@@ -4,11 +4,14 @@ import android.content.Context
 import com.example.test2.data.local.dao.FtsSearchDao
 import com.example.test2.data.local.dao.ScreenshotQueueDao
 import com.example.test2.data.local.dao.VectorDao
+import com.example.test2.data.remote.CategoryCandidateSnippet
+import com.example.test2.data.remote.GeminiApiService
 import com.example.test2.database.AppDatabaseHelper
-import com.example.test2.database.DefaultCategories
+import com.example.test2.shared.models.DefaultCategories
 import com.example.test2.shared.models.Category
 import com.example.test2.shared.models.Photo
 import com.example.test2.shared.utils.VietnameseUtils
+import com.example.test2.util.AppLogger
 import java.util.Locale
 
 /**
@@ -291,7 +294,9 @@ object RetroactiveCategorizer {
         context: Context? = null,
         vectorDao: VectorDao? = dbHelper,
         ftsDao: FtsSearchDao? = dbHelper,
-        queueDao: ScreenshotQueueDao? = dbHelper
+        queueDao: ScreenshotQueueDao? = dbHelper,
+        geminiApiService: GeminiApiService? = null,
+        isCloudAvailable: Boolean = !apiKey.isNullOrBlank()
     ): List<String> {
         val catName = category.name.trim()
         if (catName.isBlank() || photos.isEmpty()) return emptyList()
@@ -304,9 +309,15 @@ object RetroactiveCategorizer {
 
         // 1. Level 1: 768D Cloud Neural Embedding (Google gemini-embedding-2 - Pro Tier)
         val neuralScores = mutableMapOf<String, Float>()
-        if (!apiKey.isNullOrBlank() && vectorDao != null) {
+        if (isCloudAvailable && vectorDao != null) {
             try {
-                val catEmbedding = CloudAiBackendClient.getEmbedding(catName, apiKey)
+                val safeCatName = CloudPrivacyGateway.sanitizeCategoryName(catName)
+                val catEmbedding = if (safeCatName.isNotBlank()) {
+                    geminiApiService?.getEmbedding(safeCatName, apiKey ?: "")
+                        ?: CloudAiBackendClient.getEmbedding(safeCatName, apiKey ?: "")
+                } else {
+                    null
+                }
                 if (catEmbedding != null) {
                     val allNeuralVectors = vectorDao.getAllPhotoNeuralVectors()
                         .filterKeys { it in unassignedIdSet }
@@ -322,7 +333,7 @@ object RetroactiveCategorizer {
                     }
                 }
             } catch (e: Exception) {
-                android.util.Log.w("RetroactiveCategorizer", "Neural vector search failed: ${e.message}")
+                AppLogger.w("RetroactiveCategorizer", "Neural vector search failed: ${e.message}", e)
             }
         }
 
@@ -344,7 +355,7 @@ object RetroactiveCategorizer {
                     }
                 }
             } catch (e: Exception) {
-                android.util.Log.w("RetroactiveCategorizer", "On-device vector search failed: ${e.message}")
+                AppLogger.w("RetroactiveCategorizer", "On-device vector search failed: ${e.message}", e)
             }
         }
 
@@ -361,10 +372,12 @@ object RetroactiveCategorizer {
 
         // 4. Level 4: Concept Expansion
         val expandedConcepts = VisualConceptExpander.expandCategoryConcepts(catName)
-        val candidateSnippets = mutableListOf<CloudAiBackendClient.PhotoCandidateSnippet>()
+        val cloudCandidateSnippets = mutableListOf<CategoryCandidateSnippet>()
+        val localOnlyCandidateSnippets = mutableListOf<CategoryCandidateSnippet>()
 
         for (p in unassignedPhotos) {
             var effectivePhoto = p
+            var visualRawLabels: List<String> = emptyList()
 
             // Fast On-Demand OCR for cold unprocessed photos (camera photos, downloaded images)
             if (effectivePhoto.piiScrubbedText.isNullOrBlank() && context != null) {
@@ -381,6 +394,7 @@ object RetroactiveCategorizer {
             if (effectivePhoto.semanticTags.isEmpty() && context != null) {
                 try {
                     val onDemandVisual = LocalImageLabeler.analyze(context, effectivePhoto.filePath)
+                    visualRawLabels = onDemandVisual.rawLabels
                     if (onDemandVisual.vietnameseSemanticTags.isNotEmpty()) {
                         effectivePhoto = effectivePhoto.copy(semanticTags = onDemandVisual.vietnameseSemanticTags)
                     }
@@ -407,42 +421,67 @@ object RetroactiveCategorizer {
             if (confidence >= MATCH_THRESHOLD) {
                 matchedIds.add(p.id)
             } else if (confidence >= 18f || (effectivePhoto.piiScrubbedText?.isNotBlank() == true && isFtsCandidate)) {
-                // Potential borderline candidate for AI verification (bounded by MAX_CANDIDATE_LIMIT)
-                if (candidateSnippets.size < MAX_CANDIDATE_LIMIT) {
-                    val textSnippet = effectivePhoto.piiScrubbedText ?: effectivePhoto.description
-                    if (textSnippet.isNotBlank()) {
-                        candidateSnippets.add(
-                            CloudAiBackendClient.PhotoCandidateSnippet(
-                                id = p.id,
-                                title = p.title,
-                                textSnippet = textSnippet
-                            )
+                // Potential borderline candidate (bounded by MAX_CANDIDATE_LIMIT)
+                if (cloudCandidateSnippets.size + localOnlyCandidateSnippets.size < MAX_CANDIDATE_LIMIT) {
+                    val rawSnippet = effectivePhoto.piiScrubbedText
+                        ?: PiiScrubber.scrub(effectivePhoto.description).scrubbedText
+                    if (rawSnippet.isNotBlank()) {
+                        val sanitized = CloudPrivacyGateway.prepareForAnalysis(
+                            rawOrScrubbedText = rawSnippet,
+                            photoTitle = p.title,
+                            visualLabels = visualRawLabels
                         )
+                        if (sanitized.decision == PrivacyDecision.CLOUD_ELIGIBLE) {
+                            cloudCandidateSnippets.add(
+                                CategoryCandidateSnippet(
+                                    id = p.id,
+                                    title = sanitized.scrubbedTitle,
+                                    textSnippet = sanitized.scrubbedText
+                                )
+                            )
+                        } else {
+                            localOnlyCandidateSnippets.add(
+                                CategoryCandidateSnippet(
+                                    id = p.id,
+                                    title = p.title,
+                                    textSnippet = rawSnippet
+                                )
+                            )
+                        }
                     }
                 }
             }
         }
 
-        // Batch AI Verification for borderline candidates with SmartHeuristic fallback
-        if (candidateSnippets.isNotEmpty()) {
-            if (!apiKey.isNullOrBlank()) {
+        // Local-first verification for LOCAL_ONLY sensitive documents (never leaves device)
+        if (localOnlyCandidateSnippets.isNotEmpty()) {
+            fallbackVerifyWithSmartHeuristic(category, localOnlyCandidateSnippets, unassignedPhotos, matchedIds)
+        }
+
+        // Batch AI Verification for CLOUD_ELIGIBLE borderline candidates with SmartHeuristic fallback
+        if (cloudCandidateSnippets.isNotEmpty()) {
+            if (isCloudAvailable) {
                 try {
-                    val chunks = candidateSnippets.chunked(10)
+                    val chunks = cloudCandidateSnippets.chunked(10)
                     for (chunk in chunks) {
-                        val aiVerifiedIds = CloudAiBackendClient.verifyCustomCategoryCandidates(
+                        val aiVerifiedIds = geminiApiService?.verifyCustomCategoryCandidates(
                             category = category,
                             candidates = chunk,
-                            apiKey = apiKey
+                            apiKey = apiKey ?: ""
+                        ) ?: CloudAiBackendClient.verifyCustomCategoryCandidates(
+                            category = category,
+                            candidates = chunk,
+                            apiKey = apiKey ?: ""
                         )
                         matchedIds.addAll(aiVerifiedIds)
                     }
                 } catch (e: Exception) {
-                    android.util.Log.w("RetroactiveCategorizer", "AI candidate verification fallback to Heuristics: ${e.message}")
-                    fallbackVerifyWithSmartHeuristic(category, candidateSnippets, unassignedPhotos, matchedIds)
+                    AppLogger.w("RetroactiveCategorizer", "AI candidate verification fallback to Heuristics: ${e.message}", e)
+                    fallbackVerifyWithSmartHeuristic(category, cloudCandidateSnippets, unassignedPhotos, matchedIds)
                 }
             } else {
-                // Local-first Fallback: When offline or no API key, use SmartHeuristicParser
-                fallbackVerifyWithSmartHeuristic(category, candidateSnippets, unassignedPhotos, matchedIds)
+                // Local-first Fallback: When offline or unconfigured, use SmartHeuristicParser
+                fallbackVerifyWithSmartHeuristic(category, cloudCandidateSnippets, unassignedPhotos, matchedIds)
             }
         }
 
@@ -466,7 +505,7 @@ object RetroactiveCategorizer {
 
     private fun fallbackVerifyWithSmartHeuristic(
         category: Category,
-        candidateSnippets: List<CloudAiBackendClient.PhotoCandidateSnippet>,
+        candidateSnippets: List<CategoryCandidateSnippet>,
         photos: List<Photo>,
         matchedIds: MutableSet<String>
     ) {

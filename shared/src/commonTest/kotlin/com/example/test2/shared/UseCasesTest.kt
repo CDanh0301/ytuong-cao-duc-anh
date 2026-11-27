@@ -1,16 +1,22 @@
 package com.example.test2.shared
 
+import com.example.test2.shared.models.ActionCard
+import com.example.test2.shared.models.ActionCardType
 import com.example.test2.shared.models.Category
 import com.example.test2.shared.models.Folder
 import com.example.test2.shared.models.Photo
 import com.example.test2.shared.repository.InMemoryPersistenceDriver
 import com.example.test2.shared.repository.PhotoRepository
+import com.example.test2.shared.usecases.ActionCardPort
 import com.example.test2.shared.usecases.AgingMonitorPort
+import com.example.test2.shared.usecases.CloudAiConfigData
+import com.example.test2.shared.usecases.CloudAiConfigPort
 import com.example.test2.shared.usecases.DeviceScanOutput
 import com.example.test2.shared.usecases.FtsIndexPort
 import com.example.test2.shared.usecases.ImportedFileResult
 import com.example.test2.shared.usecases.MediaScannerPort
 import com.example.test2.shared.usecases.PhotoImportPort
+import com.example.test2.shared.usecases.PhotoProcessingPort
 import com.example.test2.shared.usecases.PhotoStorageCleanerPort
 import com.example.test2.shared.usecases.QueueSyncPort
 import com.example.test2.shared.usecases.RestoredFileResult
@@ -19,17 +25,29 @@ import com.example.test2.shared.usecases.SearchOutput
 import com.example.test2.shared.usecases.SemanticSearchPort
 import com.example.test2.shared.usecases.VaultPort
 import com.example.test2.shared.usecases.VaultedFileResult
+import com.example.test2.shared.usecases.WidgetPort
 import com.example.test2.shared.usecases.category.CreateCategoryUseCase
 import com.example.test2.shared.usecases.category.DeleteCategoryUseCase
+import com.example.test2.shared.usecases.category.RenameCategoryUseCase
 import com.example.test2.shared.usecases.category.RetroactiveCategoryUseCase
 import com.example.test2.shared.usecases.housekeeping.AgingCleanupUseCase
+import com.example.test2.shared.usecases.housekeeping.MarkReminderCreatedUseCase
+import com.example.test2.shared.usecases.photo.ActionCardsUseCase
 import com.example.test2.shared.usecases.photo.DeletePhotoUseCase
 import com.example.test2.shared.usecases.photo.ImportPhotosUseCase
 import com.example.test2.shared.usecases.photo.ScanDevicePhotosUseCase
+import com.example.test2.shared.usecases.photo.ScanSinglePhotoUseCase
 import com.example.test2.shared.usecases.photo.ToggleFavoriteUseCase
+import com.example.test2.shared.usecases.photo.UpdatePhotoDetailsUseCase
 import com.example.test2.shared.usecases.photo.VaultPhotoUseCase
 import com.example.test2.shared.usecases.search.SearchPhotosUseCase
+import com.example.test2.shared.usecases.settings.CloudAiConfigUseCase
+import com.example.test2.shared.usecases.settings.ToggleUserTierUseCase
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -106,6 +124,8 @@ class UseCasesTest {
         val syncedPaths = mutableListOf<Pair<String, String>>()
         val migrated = mutableListOf<Pair<String, String>>()
         val enqueued = mutableListOf<String>()
+        val updatedCategories = mutableListOf<Triple<List<String>, String?, Boolean>>()
+        val clearedCategories = mutableListOf<String>()
 
         override fun syncVaultedPathToQueue(
             photoId: String,
@@ -145,6 +165,18 @@ class UseCasesTest {
         ): Boolean {
             enqueued.add(photoId)
             return true
+        }
+
+        override fun updatePhotosCategoryInQueue(
+            photoIds: Collection<String>,
+            targetCategoryId: String?,
+            lockCategory: Boolean
+        ) {
+            updatedCategories.add(Triple(photoIds.toList(), targetCategoryId, lockCategory))
+        }
+
+        override fun clearCategoryInQueue(categoryId: String) {
+            clearedCategories.add(categoryId)
         }
     }
 
@@ -278,7 +310,8 @@ class UseCasesTest {
         testScheduler.advanceUntilIdle()
 
         val createCat = CreateCategoryUseCase(repo)
-        val deleteCat = DeleteCategoryUseCase(repo)
+        val queuePort = FakeQueueSyncPort()
+        val deleteCat = DeleteCategoryUseCase(repo, queueSyncPort = queuePort)
 
         // Free tier cannot create custom category
         assertNull(createCat("Hóa đơn", timestampMillis = 1000L))
@@ -320,13 +353,14 @@ class UseCasesTest {
             }
         }
 
-        val retroUseCase = RetroactiveCategoryUseCase(retroPort, searchPort, ftsPort, repo)
+        val retroUseCase = RetroactiveCategoryUseCase(retroPort, searchPort, ftsPort, repo, queuePort)
         val matched = retroUseCase.scanForCategory(created, forceReindex = true)
         assertEquals(listOf(photo.id), matched)
         val applied = retroUseCase.applyCategory(matched, created)
         testScheduler.advanceUntilIdle()
         assertEquals(1, applied)
         assertEquals(listOf(photo.id to "Hóa đơn"), indexedCalls)
+        assertEquals(listOf(Triple<List<String>, String?, Boolean>(listOf(photo.id), created.id, true)), queuePort.updatedCategories)
         assertTrue(reindexCount >= 2)
 
         val searchUseCase = SearchPhotosUseCase(searchPort, repo)
@@ -356,6 +390,55 @@ class UseCasesTest {
         assertTrue(repo.photos.value.isEmpty())
 
         assertTrue(deleteCat(created.id))
+        assertEquals(listOf(created.id), queuePort.clearedCategories)
+    }
+
+    @Test
+    fun testAgingCleanupUseCaseEnforcesFreeVsProAndCatchUpScan() = runTest {
+        val scope = TestScope(StandardTestDispatcher(testScheduler))
+        val repo = PhotoRepository(InMemoryPersistenceDriver(), scope)
+        testScheduler.advanceUntilIdle()
+
+        val dayMs = 86_400_000L
+        val now = 2_000_000_000_000L
+
+        repo.addPhoto(
+            fileName = "Screenshot_10d.png",
+            filePath = "/screenshots/10d.png",
+            title = "10d",
+            isScreenshot = true,
+            dateAdded = now - 10L * dayMs
+        )
+        val old35d = repo.addPhoto(
+            fileName = "Screenshot_35d.png",
+            filePath = "/screenshots/35d.png",
+            title = "35d",
+            isScreenshot = true,
+            dateAdded = now - 35L * dayMs
+        )
+        testScheduler.advanceUntilIdle()
+
+        val cleaner = FakeStorageCleaner()
+        val monitor = object : AgingMonitorPort {
+            override suspend fun checkAgingAndNotify(force: Boolean): Triple<Long, Int, Long> = Triple(now, 1, 100L)
+            override suspend fun checkAgingIfDue(): Triple<Long, Int, Long> = Triple(now, 1, 100L)
+            override fun getLastCheckedInfo(): Triple<Long, Int, Long> = Triple(now, 1, 100L)
+        }
+        val useCase = AgingCleanupUseCase(repo, cleaner, monitor)
+
+        // Free tier: active with 30-day default, cannot edit to 7 days
+        assertFalse(useCase.setDefaultRetentionDays(7))
+        val freeAging = useCase.getAgingScreenshots(nowMillis = now)
+        assertEquals(listOf(old35d.id), freeAging.map { it.id })
+        assertEquals(Triple(now, 1, 100L), useCase.runCatchUpScanIfDue())
+
+        // Pro tier: can edit default retention to 7 days
+        repo.toggleUserTier(true)
+        testScheduler.advanceUntilIdle()
+        assertTrue(useCase.setDefaultRetentionDays(7))
+        testScheduler.advanceUntilIdle()
+        val proAging = useCase.getAgingScreenshots(nowMillis = now)
+        assertEquals(2, proAging.size)
     }
 
     @Test
@@ -389,5 +472,118 @@ class UseCasesTest {
         testScheduler.advanceUntilIdle()
         assertEquals(1, cloudCalls)
         assertEquals(1, localCalls)
+    }
+
+    @Test
+    fun testPhotoDetailsScanCardsCategoryRenameAndSettingsUseCases() = runTest {
+        val scope = TestScope(StandardTestDispatcher(testScheduler))
+        val repo = PhotoRepository(InMemoryPersistenceDriver(), scope)
+        testScheduler.advanceUntilIdle()
+
+        repo.toggleUserTier(true)
+        val cat = CreateCategoryUseCase(repo)("Cũ", timestampMillis = 1000L)!!
+        val photo = repo.addPhoto(
+            fileName = "receipt.png",
+            filePath = "/p/receipt.png",
+            title = "Bill",
+            categoryIds = setOf(cat.id),
+            isScreenshot = true,
+            dateAdded = 2_000_000L
+        )
+        testScheduler.advanceUntilIdle()
+
+        var ftsTitle = ""
+        val ftsPort = object : FtsIndexPort {
+            override fun indexPhotoFts(
+                photoId: String,
+                title: String,
+                scrubbedText: String,
+                intent: String,
+                categoryNames: String,
+                semanticTags: String
+            ) {
+                ftsTitle = "$title|$categoryNames"
+            }
+        }
+        val queuePort = FakeQueueSyncPort()
+        val updateDetails = UpdatePhotoDetailsUseCase(repo, ftsPort, queuePort)
+        val updated = updateDetails(photo.id, "Hóa đơn mới", "Chi tiết", photo.folderId, setOf("cat_tobuy"), isFavorite = true)
+        testScheduler.advanceUntilIdle()
+        assertNotNull(updated)
+        assertEquals("Hóa đơn mới|Cần mua & Chi tiêu", ftsTitle)
+        assertTrue(updated.isFavorite)
+        assertEquals(listOf(Triple<List<String>, String?, Boolean>(listOf(photo.id), "cat_tobuy", true)), queuePort.updatedCategories)
+
+        val processingPort = object : PhotoProcessingPort {
+            override suspend fun scanPhotoWithCloud(photo: Photo, targetFolderId: String?) {
+                repo.updatePhotoAiMetadata(
+                    photoId = photo.id,
+                    isScreenshot = true,
+                    piiScrubbedText = "Scanned text",
+                    detectedIntent = "EVENT",
+                    suggestedEventTitle = "Meeting",
+                    isCloudEnriched = true
+                )
+            }
+        }
+        val scanned = ScanSinglePhotoUseCase(repo, processingPort)(photo.id)
+        testScheduler.advanceUntilIdle()
+        assertNotNull(scanned)
+        assertTrue(scanned.isCloudEnriched)
+
+        var reindexCount = 0
+        val searchPort = object : SemanticSearchPort {
+            override suspend fun search(query: String): SearchOutput = SearchOutput(null, null, emptyMap())
+            override suspend fun ensureVectorsIndexed(forceReindex: Boolean) {
+                if (forceReindex) reindexCount++
+            }
+        }
+        val renamed = RenameCategoryUseCase(repo, searchPort)(cat.id, "Mới", "#10B981")
+        testScheduler.advanceUntilIdle()
+        assertNotNull(renamed)
+        assertEquals("Mới", renamed.name)
+        assertEquals(1, reindexCount)
+
+        assertTrue(DeleteCategoryUseCase(repo, searchPort).deleteAndReindex(cat.id))
+        assertEquals(2, reindexCount)
+
+        MarkReminderCreatedUseCase(repo)(photo.id)
+        assertTrue(repo.photos.value.first { it.id == photo.id }.hasReminderCreated)
+
+        val widgetUpdates = mutableListOf<Boolean>()
+        val widgetPort = object : WidgetPort {
+            override fun cacheIsProAndUpdate(isPro: Boolean) { widgetUpdates.add(isPro) }
+            override fun updateAll() {}
+        }
+        repo.setSearchQuery("hóa đơn")
+        testScheduler.advanceUntilIdle()
+        val returnedQuery = ToggleUserTierUseCase(repo, widgetPort)(false)
+        assertFalse(repo.accountTier.value.isPro)
+        assertEquals(listOf(false), widgetUpdates)
+        assertEquals("hóa đơn", returnedQuery)
+
+        var storedConfig = CloudAiConfigData("", "gemini-3.5-flash-lite", "", false)
+        val configUseCase = CloudAiConfigUseCase(object : CloudAiConfigPort {
+            override fun getConfig(): CloudAiConfigData = storedConfig
+            override fun saveConfig(apiKey: String, modelName: String, customEndpoint: String, enabled: Boolean) {
+                storedConfig = CloudAiConfigData(apiKey, modelName, customEndpoint, enabled)
+            }
+        })
+        val savedCfg = configUseCase.saveConfig("key123", "gemini-3.6-flash", "", true)
+        assertEquals("key123", savedCfg.apiKey)
+        assertTrue(savedCfg.isEnabled)
+
+        val cardUpdates = MutableSharedFlow<List<String>>(extraBufferCapacity = 2)
+        val card1 = ActionCard(id = "c1", photoId = photo.id, type = ActionCardType.PAYMENT, title = "Pay")
+        val actionCardPort = object : ActionCardPort {
+            override fun getActionCardsForPhoto(photoId: String): List<ActionCard> = listOf(card1)
+            override fun getPhotoIdsByActionCardType(type: ActionCardType): Set<String> = setOf(photo.id)
+            override suspend fun reextractCardsIfNeeded(photo: Photo): List<ActionCard>? = null
+            override fun observeCardUpdates(): Flow<List<String>> = cardUpdates
+        }
+        val cardsUseCase = ActionCardsUseCase(actionCardPort, repo)
+        assertEquals(setOf(photo.id), cardsUseCase.getPhotoIdsByType(ActionCardType.PAYMENT))
+        val emissions = cardsUseCase.observeActionCards(photo.id).take(1).toList()
+        assertEquals(listOf(listOf(card1)), emissions)
     }
 }

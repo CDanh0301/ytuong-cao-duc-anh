@@ -14,7 +14,7 @@ class AgingCleanupUseCase(
     private val agingMonitor: AgingMonitorPort
 ) {
     fun getAgingScreenshots(
-        daysOld: Int = repository.agingSettings.value.retentionDays,
+        daysOld: Int = repository.agingSettings.value.effectiveDefaultRetentionDays(repository.accountTier.value.isPro),
         nowMillis: Long
     ): List<Photo> {
         return repository.getAgingPhotos(daysOld, nowMillis)
@@ -37,8 +37,16 @@ class AgingCleanupUseCase(
         return agingMonitor.checkAgingAndNotify(force = true)
     }
 
+    suspend fun runCatchUpScanIfDue(): Triple<Long, Int, Long>? {
+        return agingMonitor.checkAgingIfDue()
+    }
+
     fun getLastCheckedInfo(): Triple<Long, Int, Long> {
         return agingMonitor.getLastCheckedInfo()
+    }
+
+    fun setDefaultRetentionDays(retentionDays: Int): Boolean {
+        return repository.setDefaultRetentionDays(retentionDays)
     }
 
     fun setCategoryRetentionRule(categoryId: String, retentionDays: Int) {

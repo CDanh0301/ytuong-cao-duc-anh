@@ -93,11 +93,13 @@ class DaoContractsTest {
 
         override fun updateQueueItemState(update: QueueStateUpdate) {
             items[update.photoId]?.let { cur ->
+                val allowCategory = update.forceCategoryUpdate || !cur.isUserCategorized
                 items[update.photoId] = cur.copy(
                     status = update.status,
                     scrubbedText = update.scrubbedText ?: cur.scrubbedText,
                     detectedIntent = update.detectedIntent ?: cur.detectedIntent,
-                    targetCategoryId = update.targetCategoryId ?: cur.targetCategoryId
+                    targetCategoryId = if (allowCategory) (update.targetCategoryId ?: cur.targetCategoryId) else cur.targetCategoryId,
+                    isUserCategorized = if (update.forceCategoryUpdate) false else cur.isUserCategorized
                 )
             }
         }
@@ -152,10 +154,18 @@ class DaoContractsTest {
             entities: String?,
             itemsToBuy: String?,
             photoTitle: String?,
-            originalFileName: String?
+            originalFileName: String?,
+            forceCategoryUpdate: Boolean
         ) {
+            val existing = items[photoId]
+            val finalCat = if (existing?.isUserCategorized == true && !forceCategoryUpdate) {
+                existing.targetCategoryId
+            } else {
+                targetCategoryId
+            }
+            val finalLocked = if (forceCategoryUpdate) false else (existing?.isUserCategorized == true)
             items[photoId] = ScreenshotQueueItem(
-                id = items[photoId]?.id ?: (items.size + 1L),
+                id = existing?.id ?: (items.size + 1L),
                 photoId = photoId,
                 filePath = filePath,
                 dateAdded = dateAdded,
@@ -164,13 +174,46 @@ class DaoContractsTest {
                 detectedIntent = detectedIntent,
                 eventTitle = eventTitle,
                 eventDateMillis = eventDateMillis,
-                targetCategoryId = targetCategoryId
+                targetCategoryId = finalCat,
+                isUserCategorized = finalLocked
             )
+        }
+
+        override fun updatePhotosCategoryInQueue(
+            photoIds: Collection<String>,
+            targetCategoryId: String?,
+            lockCategory: Boolean
+        ) {
+            for (photoId in photoIds) {
+                items[photoId]?.let { cur ->
+                    items[photoId] = cur.copy(
+                        targetCategoryId = targetCategoryId,
+                        isUserCategorized = lockCategory
+                    )
+                }
+            }
+        }
+
+        override fun clearCategoryInQueue(categoryId: String) {
+            for ((photoId, item) in items.toMap()) {
+                if (item.targetCategoryId == categoryId) {
+                    items[photoId] = item.copy(targetCategoryId = null)
+                }
+            }
         }
 
         override fun getProcessedScreenshot(photoId: String): ProcessedScreenshotRecord? =
             items[photoId]?.takeIf { it.status == QueueStatus.COMPLETED.name }?.let {
-                ProcessedScreenshotRecord(it.photoId, it.filePath, it.scrubbedText, it.detectedIntent, it.eventTitle, it.eventDateMillis, it.targetCategoryId)
+                ProcessedScreenshotRecord(
+                    photoId = it.photoId,
+                    filePath = it.filePath,
+                    scrubbedText = it.scrubbedText,
+                    detectedIntent = it.detectedIntent,
+                    eventTitle = it.eventTitle,
+                    eventDateMillis = it.eventDateMillis,
+                    targetCategoryId = it.targetCategoryId,
+                    isUserCategorized = it.isUserCategorized
+                )
             }
 
         override fun resetHangingProcessingItems() {
@@ -245,6 +288,18 @@ class DaoContractsTest {
 
         dao.migratePhotoRecords("p1", "p2", "content://2", 1000L, "ocr", "EVENT", "Meet", null, "cat_events")
         assertTrue(dao.isScreenshotProcessedOrNotified("p2"))
+
+        dao.updatePhotosCategoryInQueue(listOf("p2"), "cat_custom_1", lockCategory = true)
+        assertEquals("cat_custom_1", dao.getProcessedScreenshot("p2")?.targetCategoryId)
+        assertTrue(dao.getProcessedScreenshot("p2")?.isUserCategorized == true)
+
+        // Background AI write without forceCategoryUpdate must not overwrite user category
+        dao.recordProcessedScreenshot("p2", "content://2", 1000L, "ocr", "SHOPPING", "Buy", null, "cat_tobuy")
+        assertEquals("cat_custom_1", dao.getProcessedScreenshot("p2")?.targetCategoryId)
+
+        dao.clearCategoryInQueue("cat_custom_1")
+        assertEquals(null, dao.getProcessedScreenshot("p2")?.targetCategoryId)
+
         dao.purgePhotoData("p2")
         assertFalse(dao.isScreenshotProcessedOrNotified("p2"))
     }

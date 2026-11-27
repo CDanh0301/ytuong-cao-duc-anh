@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Thư viện ảnh</string>
+    <string name="app_name">MemoCap</string>
     <string name="search_bar_hint">Tìm ảnh, hóa đơn, địa chỉ...</string>
     <string name="widget_search_description">Tìm kiếm tức thì ảnh chụp màn hình bằng từ khóa OCR, ngữ nghĩa AI và thẻ thông minh.</string>
     <string name="widget_search_cd">Tìm ảnh</string>

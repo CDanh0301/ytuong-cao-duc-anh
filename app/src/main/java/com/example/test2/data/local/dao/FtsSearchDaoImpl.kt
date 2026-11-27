@@ -8,7 +8,8 @@ import com.example.test2.shared.utils.VietnameseUtils
  * SQLite FTS5/FTS4 implementation of [FtsSearchDao].
  */
 class FtsSearchDaoImpl(
-    private val dbProvider: SQLiteOpenHelper
+    private val dbProvider: SQLiteOpenHelper,
+    private val logError: (String, Throwable) -> Unit = { _, _ -> }
 ) : FtsSearchDao {
 
     override fun indexPhotoFts(
@@ -43,7 +44,8 @@ class FtsSearchDaoImpl(
                 put("category_names", normCat)
             }
             db.insert(TABLE_FTS, null, values)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed indexing FTS for $photoId", e)
         }
     }
 
@@ -51,7 +53,8 @@ class FtsSearchDaoImpl(
         try {
             val db = dbProvider.writableDatabase
             db.delete(TABLE_FTS, "photo_id = ?", arrayOf(photoId))
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed removing FTS for $photoId", e)
         }
     }
 
@@ -91,7 +94,8 @@ class FtsSearchDaoImpl(
             if (results.isEmpty() && tokens.size > 1) {
                 results.addAll(executeFtsMatch(db, orQuery))
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("FTS search failed for '$query'", e)
         }
 
         if (results.isEmpty()) {
@@ -147,7 +151,8 @@ class FtsSearchDaoImpl(
                     rank -= 0.5
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("FTS fallback LIKE search failed for '$query'", e)
         }
         return matches
     }

@@ -11,7 +11,8 @@ data class AnalysisResult(
     val ocr: StructuredOcr,
     val cards: List<ActionCard>,
     val scrubbedText: String,
-    val visual: VisualAnalysisResult
+    val visual: VisualAnalysisResult,
+    val hasPiiRedacted: Boolean = false
 )
 
 object OnDeviceAnalysis {
@@ -63,7 +64,8 @@ object OnDeviceAnalysis {
                 ocr = ocr,
                 cards = cards,
                 scrubbedText = scrubbed.scrubbedText,
-                visual = visual
+                visual = visual,
+                hasPiiRedacted = scrubbed.hasPiiRedacted
             )
         } finally {
             decoded.bitmap.recycle()

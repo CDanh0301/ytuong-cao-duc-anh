@@ -2,25 +2,14 @@ package com.example.test2.ai
 
 import android.content.Intent
 import android.provider.CalendarContract
-import com.example.test2.database.DefaultCategories
 import com.example.test2.shared.models.Category
+import com.example.test2.shared.models.DefaultCategories
 import com.example.test2.shared.models.Photo
 import com.example.test2.shared.utils.VietnameseUtils
 import java.util.Calendar
 import java.util.Locale
 
-data class ParsedScreenshotData(
-    val detectedIntent: String,
-    val suggestedEventTitle: String? = null,
-    val suggestedEventDateMillis: Long? = null,
-    val targetCategoryId: String? = null,
-    val suggestedEventDescription: String? = null,
-    val semanticTags: List<String> = emptyList(),
-    val summary: String? = null,
-    val entities: Map<String, String> = emptyMap(),
-    val itemsToBuy: List<String> = emptyList(),
-    val isCloudEnriched: Boolean = false
-)
+typealias ParsedScreenshotData = com.example.test2.data.remote.ParsedScreenshotData
 
 object SmartHeuristicParser {
 
@@ -84,14 +73,14 @@ object SmartHeuristicParser {
         )
     }
 
-    val DEFAULT_CATEGORY_IDS = com.example.test2.database.DefaultCategories.ALL_IDS
+    val DEFAULT_CATEGORY_IDS = DefaultCategories.ALL_IDS
 
     val DEFAULT_CATEGORIES = listOf(
-        Category(id = com.example.test2.database.DefaultCategories.EVENTS, name = "Lịch & Sự kiện", colorHex = "#3B82F6", iconName = "plane", createdAt = 1000L),
-        Category(id = com.example.test2.database.DefaultCategories.TO_BUY, name = "Cần mua & Chi tiêu", colorHex = "#F59E0B", iconName = "utensils", createdAt = 2000L),
-        Category(id = com.example.test2.database.DefaultCategories.READING, name = "Đọc & Tham khảo", colorHex = "#8B5CF6", iconName = "tag", createdAt = 3000L),
-        Category(id = com.example.test2.database.DefaultCategories.NATURE, name = "Thiên nhiên & Phong cảnh", colorHex = "#009688", iconName = "leaf", createdAt = 4000L),
-        Category(id = com.example.test2.database.DefaultCategories.PERSONAL, name = "Cá nhân & Giấy tờ", colorHex = "#EC4899", iconName = "user", createdAt = 5000L)
+        Category(id = DefaultCategories.EVENTS, name = "Lịch & Sự kiện", colorHex = "#1E4240", iconName = "tag", createdAt = 1000L),
+        Category(id = DefaultCategories.TO_BUY, name = "Cần mua & Chi tiêu", colorHex = "#B89054", iconName = "utensils", createdAt = 2000L),
+        Category(id = DefaultCategories.READING, name = "Đọc & Tham khảo", colorHex = "#7E8D78", iconName = "building", createdAt = 3000L),
+        Category(id = DefaultCategories.NATURE, name = "Thiên nhiên & Phong cảnh", colorHex = "#5A7364", iconName = "leaf", createdAt = 4000L),
+        Category(id = DefaultCategories.PERSONAL, name = "Cá nhân & Giấy tờ", colorHex = "#7A5C7E", iconName = "user", createdAt = 5000L)
     )
 
     private val EVENT_ACTION_KEYWORDS get() = HeuristicKeywords.EVENT_ACTION_KEYWORDS

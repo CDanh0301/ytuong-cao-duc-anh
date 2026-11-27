@@ -1,14 +1,10 @@
 package com.example.test2.presentation.gallery
 
-import android.app.Application
-import android.net.Uri
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.test2.ai.CloudAiSyncNotifier
-import com.example.test2.ai.OnDeviceAnalysis
-import com.example.test2.ai.cards.CardIds
-import com.example.test2.ai.cards.QualityFlags
-import com.example.test2.di.AppContainer
+import com.example.test2.ai.ScreenshotSyncOrchestrator
+import com.example.test2.presentation.main.MainNavigationState
+import com.example.test2.presentation.vault.VaultStateStore
 import com.example.test2.shared.models.ActionCard
 import com.example.test2.shared.models.ActionCardType
 import com.example.test2.shared.models.Category
@@ -17,41 +13,52 @@ import com.example.test2.shared.models.Photo
 import com.example.test2.shared.models.PhotoFilter
 import com.example.test2.shared.models.SortOption
 import com.example.test2.shared.models.UserAccountTier
+import com.example.test2.shared.repository.IPhotoRepository
+import com.example.test2.shared.usecases.MetadataSyncPort
+import com.example.test2.shared.usecases.photo.ActionCardsUseCase
+import com.example.test2.shared.usecases.photo.DeletePhotoUseCase
+import com.example.test2.shared.usecases.photo.ImportPhotosUseCase
+import com.example.test2.shared.usecases.photo.ScanSinglePhotoUseCase
+import com.example.test2.shared.usecases.photo.ToggleFavoriteUseCase
+import com.example.test2.shared.usecases.photo.UpdatePhotoDetailsUseCase
+import com.example.test2.shared.usecases.search.SearchPhotosUseCase
+import com.example.test2.shared.usecases.settings.CloudAiConfigUseCase
+import com.example.test2.shared.usecases.settings.ToggleUserTierUseCase
 import com.example.test2.ui.AppTab
 import com.example.test2.ui.GalleryDisplayMode
-import com.example.test2.widget.PhotoSearchWidgetProvider
-import com.example.test2.widget.PhotoSearchWidgetUpdater
+import com.example.test2.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 
 /**
- * ViewModel dedicated to Gallery display, search, action card filtering, photo viewer/settings, and imports.
+ * Pure MVVM ViewModel dedicated to Gallery display, search, action card filtering,
+ * photo viewer/settings, and imports. Owns its UI state and observes repository & orchestrator flows.
  */
 class GalleryViewModel(
-    private val app: Application,
-    private val container: AppContainer
-) : AndroidViewModel(app) {
-
-    private val repository = container.repository
-    private val session = container.sessionState
-    private val orchestrator = container.syncOrchestrator
-    private val actionCardDao = container.actionCardDao
-    private val ftsDao = container.ftsDao
-    private val processingCoordinator = container.processingCoordinator
-    private val deletePhotoUseCase = container.deletePhotoUseCase
-    private val toggleFavoriteUseCase = container.toggleFavoriteUseCase
-    private val importPhotosUseCase = container.importPhotosUseCase
-    private val searchPhotosUseCase = container.searchPhotosUseCase
+    private val repository: IPhotoRepository,
+    private val navigationState: MainNavigationState,
+    private val vaultState: VaultStateStore,
+    private val orchestrator: ScreenshotSyncOrchestrator,
+    private val deletePhotoUseCase: DeletePhotoUseCase,
+    private val toggleFavoriteUseCase: ToggleFavoriteUseCase,
+    private val importPhotosUseCase: ImportPhotosUseCase,
+    private val searchPhotosUseCase: SearchPhotosUseCase,
+    private val updatePhotoDetailsUseCase: UpdatePhotoDetailsUseCase,
+    private val scanSinglePhotoUseCase: ScanSinglePhotoUseCase,
+    private val actionCardsUseCase: ActionCardsUseCase,
+    private val toggleUserTierUseCase: ToggleUserTierUseCase,
+    private val cloudAiConfigUseCase: CloudAiConfigUseCase,
+    private val metadataSync: MetadataSyncPort
+) : ViewModel() {
 
     val photos: StateFlow<List<Photo>> = repository.photos
     val filteredPhotos: StateFlow<List<Photo>> = repository.filteredPhotos
@@ -60,12 +67,40 @@ class GalleryViewModel(
     val currentFilter: StateFlow<PhotoFilter> = repository.currentFilter
     val accountTier: StateFlow<UserAccountTier> = repository.accountTier
 
+    private val displayMode = MutableStateFlow(GalleryDisplayMode.BIG_PREVIEW)
+    private val photoSettingsId = MutableStateFlow<String?>(null)
+    private val photoToDelete = MutableStateFlow<Photo?>(null)
+    private val semanticMatchScores = MutableStateFlow<Map<String, Float>>(emptyMap())
+    private val isLocalBusy = MutableStateFlow(false)
+    private val errorMessage = MutableStateFlow<String?>(null)
+
+    private val resolvedPhotoSettings = combine(
+        photoSettingsId,
+        repository.photos
+    ) { targetId, allPhotos ->
+        if (targetId == null) null else allPhotos.firstOrNull { it.id == targetId }
+    }
+
+    private val repoMetadataFlow = combine(
+        repository.photos,
+        repository.folders,
+        repository.categories,
+        repository.accountTier
+    ) { allPhotos, allFolders, allCategories, tier ->
+        GalleryUiState(
+            allPhotosCount = allPhotos.size,
+            folders = allFolders,
+            categories = allCategories,
+            accountTier = tier
+        )
+    }
+
     private val filterDisplayFlow = combine(
         repository.filteredPhotos,
         repository.currentFilter,
-        session.displayMode,
-        session.semanticMatchScores,
-        session.isVectorIndexing
+        displayMode,
+        semanticMatchScores,
+        orchestrator.isVectorIndexing
     ) { filtered, filter, mode, scores, indexing ->
         GalleryUiState(
             photos = filtered,
@@ -73,116 +108,149 @@ class GalleryViewModel(
             searchQuery = filter.searchQuery,
             displayMode = mode,
             semanticMatchScores = scores,
-            isVectorIndexing = indexing
+            isVectorIndexing = indexing,
+            activeActionCardType = filter.actionCardType ?: ActionCardType.ALL
         )
     }
 
     private val modalStateFlow = combine(
-        session.viewingPhotoId,
-        session.photoSettings,
-        session.photoToDelete,
-        session.activeActionCardType,
-        session.actionCardPhotoCounts
-    ) { viewerId, settings, toDelete, cardType, cardCounts ->
+        navigationState.viewingPhotoId,
+        resolvedPhotoSettings,
+        photoToDelete,
+        orchestrator.actionCardPhotoCounts,
+        errorMessage
+    ) { viewerId, settings, toDelete, cardCounts, err ->
         GalleryUiState(
             viewerPhotoId = viewerId,
             photoSettings = settings,
             photoToDelete = toDelete,
-            activeActionCardType = cardType,
-            actionCardPhotoCounts = cardCounts
+            actionCardPhotoCounts = cardCounts,
+            error = err
         )
     }
 
+    private val syncStatusFlow = combine(
+        orchestrator.isScanning,
+        isLocalBusy,
+        orchestrator.pendingAiCount
+    ) { scanning, localBusy, pending ->
+        Triple(scanning || localBusy, pending, Unit)
+    }
+
     val uiState: StateFlow<GalleryUiState> = combine(
+        repoMetadataFlow,
         filterDisplayFlow,
         modalStateFlow,
-        session.isScanning,
-        session.pendingAiCount
-    ) { base, modals, scanning, pending ->
+        syncStatusFlow
+    ) { meta, base, modals, status ->
         base.copy(
+            allPhotosCount = meta.allPhotosCount,
+            folders = meta.folders,
+            categories = meta.categories,
+            accountTier = meta.accountTier,
             viewerPhotoId = modals.viewerPhotoId,
             photoSettings = modals.photoSettings,
             photoToDelete = modals.photoToDelete,
-            activeActionCardType = modals.activeActionCardType,
             actionCardPhotoCounts = modals.actionCardPhotoCounts,
-            isLoading = scanning,
-            pendingAiCount = pending
+            isLoading = status.first,
+            pendingAiCount = status.second,
+            error = modals.error
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, GalleryUiState())
 
     private var searchJob: Job? = null
 
-    fun setDisplayMode(mode: GalleryDisplayMode) {
-        session.displayMode.value = mode
-    }
-
-    fun viewPhoto(photo: Photo?) {
-        session.viewingPhotoId.value = photo?.id
-    }
-
-    fun closePhotoViewer() {
-        session.viewingPhotoId.value = null
-        session.photoSettings.value = null
-    }
-
-    fun openPhotoSettings(photo: Photo) {
-        session.photoSettings.value = photo
-    }
-
-    fun closePhotoSettings() {
-        session.photoSettings.value = null
-    }
-
-    fun setPhotoToDelete(photo: Photo?) {
-        session.photoToDelete.value = photo
-    }
-
-    fun scanSinglePhoto(photoId: String) {
-        val photo = repository.photos.value.firstOrNull { it.id == photoId } ?: return
+    init {
         viewModelScope.launch {
-            session.isScanning.value = true
-            processingCoordinator.scanPhotoWithCloud(photo)
-            if (session.photoSettings.value?.id == photoId) {
-                session.photoSettings.value = repository.photos.value.firstOrNull { it.id == photoId }
+            vaultState.restoredPhotoIdEvents.collect { (oldId, newId) ->
+                if (photoSettingsId.value == oldId) {
+                    photoSettingsId.value = newId
+                }
             }
-            session.isScanning.value = false
         }
     }
 
-    fun importPhotos(uris: List<Uri>) {
-        if (uris.isEmpty()) return
+    fun dismissError() {
+        errorMessage.value = null
+    }
+
+    fun setDisplayMode(mode: GalleryDisplayMode) {
+        displayMode.value = mode
+    }
+
+    fun viewPhoto(photo: Photo?) {
+        navigationState.viewingPhotoId.value = photo?.id
+    }
+
+    fun closePhotoViewer() {
+        navigationState.viewingPhotoId.value = null
+        photoSettingsId.value = null
+    }
+
+    fun openPhotoSettings(photo: Photo) {
+        photoSettingsId.value = photo.id
+    }
+
+    fun closePhotoSettings() {
+        photoSettingsId.value = null
+    }
+
+    fun setPhotoToDelete(photo: Photo?) {
+        photoToDelete.value = photo
+    }
+
+    fun scanSinglePhoto(photoId: String) {
         viewModelScope.launch {
-            session.isScanning.value = true
-            val targetFolderId = repository.currentFilter.value.folderId
-            val targetCategoryIds = repository.currentFilter.value.categoryId?.let { setOf(it) } ?: emptySet()
-            importPhotosUseCase(
-                uriStrings = uris.map { it.toString() },
-                targetFolderId = targetFolderId,
-                targetCategoryIds = targetCategoryIds,
-                baseTimestampMillis = System.currentTimeMillis()
-            )
-            session.isScanning.value = false
+            isLocalBusy.value = true
+            try {
+                val updated = scanSinglePhotoUseCase(photoId)
+                if (updated != null) {
+                    metadataSync.markMetadataDirty()
+                }
+            } catch (e: Exception) {
+                AppLogger.e("GalleryViewModel", "Failed scanning single photo $photoId", e)
+                errorMessage.value = "Không thể quét lại ảnh"
+            } finally {
+                isLocalBusy.value = false
+            }
+        }
+    }
+
+    fun importPhotos(uriStrings: List<String>) {
+        if (uriStrings.isEmpty()) return
+        viewModelScope.launch {
+            isLocalBusy.value = true
+            try {
+                val targetFolderId = repository.currentFilter.value.folderId
+                val targetCategoryIds = repository.currentFilter.value.categoryId?.let { setOf(it) } ?: emptySet()
+                importPhotosUseCase(
+                    uriStrings = uriStrings,
+                    targetFolderId = targetFolderId,
+                    targetCategoryIds = targetCategoryIds,
+                    baseTimestampMillis = System.currentTimeMillis()
+                )
+                metadataSync.markMetadataDirty()
+            } catch (e: Exception) {
+                AppLogger.e("GalleryViewModel", "Failed importing photos", e)
+                errorMessage.value = "Không thể nhập ảnh đã chọn"
+            } finally {
+                isLocalBusy.value = false
+            }
         }
     }
 
     fun toggleFavorite(photoId: String) {
-        val newState = toggleFavoriteUseCase(photoId)
-        if (session.photoSettings.value?.id == photoId) {
-            session.photoSettings.value = session.photoSettings.value?.copy(isFavorite = newState)
-        }
+        toggleFavoriteUseCase(photoId)
+        metadataSync.markMetadataDirty()
     }
 
     fun toggleFavoriteFilter() = repository.toggleFavoriteFilter()
 
     fun toggleUserTier(isPro: Boolean) {
-        repository.toggleUserTier(isPro)
-        PhotoSearchWidgetProvider.cacheIsPro(app, isPro)
-        viewModelScope.launch(Dispatchers.IO) {
-            PhotoSearchWidgetUpdater.updateAll(app)
-        }
-        val query = repository.currentFilter.value.searchQuery
-        if (query.isNotBlank()) {
-            setSearchQuery(query)
+        val activeQuery = toggleUserTierUseCase(isPro)
+        metadataSync.markMetadataDirty()
+        if (activeQuery.isNotBlank()) {
+            setSearchQuery(activeQuery)
         }
     }
 
@@ -194,129 +262,99 @@ class GalleryViewModel(
         categoryIds: Set<String>,
         isFavorite: Boolean? = null
     ) {
-        val updated = repository.updatePhoto(photoId, title, description, folderId, categoryIds, isFavorite)
-        if (session.photoSettings.value?.id == photoId) {
-            session.photoSettings.value = updated
-        }
-        updated?.let { p ->
-            val catNames = repository.categories.value
-                .filter { it.id in p.categoryIds }
-                .joinToString(" ") { it.name }
-            ftsDao.indexPhotoFts(
-                photoId = p.id,
-                title = p.title,
-                scrubbedText = p.piiScrubbedText ?: p.description,
-                intent = p.detectedIntent ?: "",
-                categoryNames = catNames
-            )
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                updatePhotoDetailsUseCase(photoId, title, description, folderId, categoryIds, isFavorite)
+                metadataSync.markMetadataDirty()
+            } catch (e: Exception) {
+                AppLogger.e("GalleryViewModel", "Failed updating photo details $photoId", e)
+                errorMessage.value = "Không thể cập nhật thông tin ảnh"
+            }
         }
     }
 
     fun deletePhotoConfirmed(photo: Photo) {
         viewModelScope.launch {
-            deletePhotoUseCase(photo)
-            orchestrator.refreshActionCardCounts()
-            if (session.viewingPhotoId.value == photo.id) {
-                session.viewingPhotoId.value = null
+            try {
+                deletePhotoUseCase(photo)
+                metadataSync.markMetadataDirty()
+                orchestrator.refreshActionCardCounts()
+                if (navigationState.viewingPhotoId.value == photo.id) {
+                    navigationState.viewingPhotoId.value = null
+                }
+                if (photoSettingsId.value == photo.id) {
+                    photoSettingsId.value = null
+                }
+                photoToDelete.value = null
+            } catch (e: Exception) {
+                AppLogger.e("GalleryViewModel", "Failed deleting photo ${photo.id}", e)
+                errorMessage.value = "Không thể xóa ảnh"
+                photoToDelete.value = null
             }
-            if (session.photoSettings.value?.id == photo.id) {
-                session.photoSettings.value = null
-            }
-            session.photoToDelete.value = null
         }
     }
 
     fun filterByFolder(folderId: String?) {
         repository.setFolderFilter(folderId)
-        session.activeTab.value = AppTab.PHOTOS
+        navigationState.activeTab.value = AppTab.PHOTOS
     }
 
     fun filterByCategory(categoryId: String?) {
         repository.setCategoryFilter(categoryId)
-        session.activeTab.value = AppTab.PHOTOS
+        navigationState.activeTab.value = AppTab.PHOTOS
     }
 
     fun setActionCardFilter(type: ActionCardType) {
-        session.activeActionCardType.value = type
+        if (type == ActionCardType.ALL) {
+            repository.setActionCardFilter(null, null)
+            return
+        }
+        repository.setActionCardFilter(type, null)
         viewModelScope.launch(Dispatchers.IO) {
-            if (type == ActionCardType.ALL) {
-                repository.setActionCardFilter(null, null)
-            } else {
-                val matchingIds = actionCardDao.getPhotoIdsByActionCardType(type)
-                repository.setActionCardFilter(type, matchingIds)
+            try {
+                val matchingIds = actionCardsUseCase.getPhotoIdsByType(type)
+                if (repository.currentFilter.value.actionCardType == type) {
+                    repository.setActionCardFilter(type, matchingIds)
+                }
+            } catch (e: Exception) {
+                AppLogger.e("GalleryViewModel", "Failed filtering by action card $type", e)
             }
         }
     }
 
     fun getActionCardsForPhoto(photoId: String): List<ActionCard> =
-        actionCardDao.getActionCardsForPhoto(photoId)
+        actionCardsUseCase.getActionCardsForPhoto(photoId)
 
-    fun observeActionCards(photoId: String): Flow<List<ActionCard>> = flow {
-        emit(actionCardDao.getActionCardsForPhoto(photoId))
-
-        if (QualityFlags.REEXTRACT_ON_OPEN) {
-            checkAndReextractCardsIfOld(photoId)
-        }
-
-        CloudAiSyncNotifier.syncEvents.collect { updatedPhotoIds ->
-            if (photoId in updatedPhotoIds) {
-                emit(actionCardDao.getActionCardsForPhoto(photoId))
-            }
-        }
-    }.flowOn(Dispatchers.IO)
-
-    private fun checkAndReextractCardsIfOld(photoId: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val existing = actionCardDao.getActionCardsForPhoto(photoId)
-            val needsExtraction = existing.isEmpty() || existing.any { card ->
-                val ev = try {
-                    JSONObject(card.payloadJson).optInt("ev", 1)
-                } catch (_: Exception) {
-                    1
-                }
-                ev < CardIds.EXTRACTOR_VERSION
-            }
-            if (needsExtraction) {
-                val photo = repository.photos.value.find { it.id == photoId } ?: return@launch
-                val result = OnDeviceAnalysis.analyze(
-                    context = app,
-                    photoId = photoId,
-                    filePath = photo.filePath,
-                    photoTitle = photo.title
-                )
-                if (result != null) {
-                    actionCardDao.replaceActionCardsForPhoto(photoId, result.cards)
-                    CloudAiSyncNotifier.notifyBatchCompleted(listOf(photoId))
-                    orchestrator.refreshActionCardCounts()
-                }
-            }
-        }
-    }
+    fun observeActionCards(photoId: String): Flow<List<ActionCard>> =
+        actionCardsUseCase.observeActionCards(photoId).flowOn(Dispatchers.IO)
 
     fun setSearchQuery(query: String) {
         searchJob?.cancel()
         searchJob = viewModelScope.launch(Dispatchers.IO) {
             val trimmed = query.trim()
             if (trimmed.isEmpty()) {
-                session.semanticMatchScores.value = emptyMap()
+                semanticMatchScores.value = emptyMap()
                 searchPhotosUseCase("")
                 return@launch
             }
             delay(400)
-            val result = searchPhotosUseCase(query)
-            session.semanticMatchScores.value = result.semanticMatchScores
+            try {
+                val result = searchPhotosUseCase(query)
+                semanticMatchScores.value = result.semanticMatchScores
+            } catch (e: Exception) {
+                AppLogger.e("GalleryViewModel", "Search failed for '$query'", e)
+                errorMessage.value = "Tìm kiếm gặp lỗi"
+            }
         }
     }
 
     fun setSortOption(sortOption: SortOption) = repository.setSortOption(sortOption)
 
     fun clearFilters() {
-        session.activeActionCardType.value = ActionCardType.ALL
         repository.clearFilters()
     }
 
     fun saveCloudAiConfig(apiKey: String, modelName: String, customEndpoint: String, enabled: Boolean) {
-        container.cloudAiPrefs.saveConfig(apiKey, modelName, customEndpoint, enabled)
-        session.cloudAiConfig.value = container.cloudAiPrefs.getConfig()
+        cloudAiConfigUseCase.saveConfig(apiKey, modelName, customEndpoint, enabled)
     }
 }

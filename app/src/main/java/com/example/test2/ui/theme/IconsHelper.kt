@@ -1,17 +1,17 @@
 package com.example.test2.ui.theme
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Label
-import androidx.compose.material.icons.filled.Apartment
-import androidx.compose.material.icons.filled.Eco
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.Flight
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Pets
-import androidx.compose.material.icons.filled.PhotoCamera
-import androidx.compose.material.icons.filled.Restaurant
-import androidx.compose.material.icons.filled.Work
+import androidx.compose.material.icons.automirrored.outlined.Label
+import androidx.compose.material.icons.outlined.Apartment
+import androidx.compose.material.icons.outlined.Eco
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.Flight
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Pets
+import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.Restaurant
+import androidx.compose.material.icons.outlined.WorkOutline
 import androidx.compose.ui.graphics.vector.ImageVector
 
 object IconsHelper {
@@ -41,17 +41,17 @@ object IconsHelper {
 
     fun getIconByName(iconName: String?): ImageVector {
         return when (iconName?.lowercase()) {
-            "camera" -> Icons.Default.PhotoCamera
-            "heart" -> Icons.Default.Favorite
-            "plane" -> Icons.Default.Flight
-            "briefcase" -> Icons.Default.Work
-            "leaf" -> Icons.Default.Eco
-            "user" -> Icons.Default.Person
-            "utensils" -> Icons.Default.Restaurant
-            "building" -> Icons.Default.Apartment
-            "paw" -> Icons.Default.Pets
-            "tag" -> Icons.AutoMirrored.Filled.Label
-            else -> Icons.Default.Folder
+            "camera" -> Icons.Outlined.PhotoCamera
+            "heart" -> Icons.Outlined.FavoriteBorder
+            "plane" -> Icons.Outlined.Flight
+            "briefcase" -> Icons.Outlined.WorkOutline
+            "leaf" -> Icons.Outlined.Eco
+            "user" -> Icons.Outlined.Person
+            "utensils" -> Icons.Outlined.Restaurant
+            "building" -> Icons.Outlined.Apartment
+            "paw" -> Icons.Outlined.Pets
+            "tag" -> Icons.AutoMirrored.Outlined.Label
+            else -> Icons.Outlined.Folder
         }
     }
 }

@@ -9,20 +9,20 @@ import com.example.test2.database.QueueStatus
 import com.example.test2.services.ScreenshotQueueWorker
 import com.example.test2.shared.models.ActionCardType
 import com.example.test2.shared.models.Photo
+import com.example.test2.shared.repository.IPhotoRepository
 import com.example.test2.shared.repository.PhotoAiMetadataUpdate
-import com.example.test2.shared.repository.PhotoRepository
+import com.example.test2.shared.usecases.WidgetPort
 import com.example.test2.shared.usecases.photo.ScanDevicePhotosUseCase
 import com.example.test2.shared.usecases.search.SearchPhotosUseCase
 import com.example.test2.storage.isEncryptedPath
-import com.example.test2.widget.PhotoSearchWidgetProvider
-import com.example.test2.widget.PhotoSearchWidgetUpdater
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
@@ -33,36 +33,41 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class ScreenshotSyncOrchestrator(
     private val context: Context,
-    private val repository: PhotoRepository,
+    private val repository: IPhotoRepository,
     private val queueDao: ScreenshotQueueDao,
     private val ftsDao: FtsSearchDao,
     private val actionCardDao: ActionCardDao,
     private val processingCoordinator: PhotoProcessingCoordinator,
     private val scanDevicePhotosUseCase: ScanDevicePhotosUseCase,
     private val searchPhotosUseCase: SearchPhotosUseCase,
-    val scanLock: Mutex,
-    private val isLocalScanning: MutableStateFlow<Boolean>,
-    private val pendingAiCount: MutableStateFlow<Int>,
-    private val isScanning: MutableStateFlow<Boolean>,
-    private val isVectorIndexing: MutableStateFlow<Boolean>,
-    private val actionCardPhotoCounts: MutableStateFlow<Map<ActionCardType, Int>>
+    private val widgetPort: WidgetPort
 ) {
     private val appContext = context.applicationContext
     private val hasPendingScanRequest = AtomicBoolean(false)
     private var onDeviceTriageJob: Job? = null
 
+    val scanLock = Mutex()
+    private val _isLocalScanning = MutableStateFlow(false)
+    private val _pendingAiCount = MutableStateFlow(0)
+    val pendingAiCount: StateFlow<Int> = _pendingAiCount.asStateFlow()
+    private val _isScanning = MutableStateFlow(false)
+    val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
+    private val _isVectorIndexing = MutableStateFlow(false)
+    val isVectorIndexing: StateFlow<Boolean> = _isVectorIndexing.asStateFlow()
+    private val _actionCardPhotoCounts = MutableStateFlow<Map<ActionCardType, Int>>(emptyMap())
+    val actionCardPhotoCounts: StateFlow<Map<ActionCardType, Int>> = _actionCardPhotoCounts.asStateFlow()
+
     fun updateScanningState() {
         val pending = queueDao.getPendingQueueCount()
-        pendingAiCount.value = pending
-        isScanning.value = isLocalScanning.value || pending > 0
+        _pendingAiCount.value = pending
+        _isScanning.value = _isLocalScanning.value || pending > 0
     }
 
     suspend fun refreshActionCardCounts() = withContext(Dispatchers.IO) {
         actionCardDao.cleanOrphanedActionCards()
         val counts = actionCardDao.getActionCardsPhotoCountByType()
-        actionCardPhotoCounts.value = counts
-        PhotoSearchWidgetProvider.cacheIsPro(appContext, repository.accountTier.value.isPro)
-        PhotoSearchWidgetUpdater.updateAll(appContext)
+        _actionCardPhotoCounts.value = counts
+        widgetPort.cacheIsProAndUpdate(repository.accountTier.value.isPro)
     }
 
     fun observeCloudAiSyncEvents(scope: CoroutineScope) {
@@ -71,14 +76,15 @@ class ScreenshotSyncOrchestrator(
                 repository.awaitInitialLoad()
                 val records = queueDao.getProcessedScreenshotsByIds(completedIds)
                 val currentPhotos = repository.photos.value
-                val existingIds = currentPhotos.map { it.id }.toSet()
+                val existingById = currentPhotos.associateBy { it.id }
 
                 val missingVaultedPhotos = mutableListOf<Photo>()
                 val updates = mutableListOf<PhotoAiMetadataUpdate>()
 
                 for (record in records) {
                     val isVaulted = record.filePath.isEncryptedPath()
-                    if (record.photoId !in existingIds) {
+                    val existingPhoto = existingById[record.photoId]
+                    if (existingPhoto == null) {
                         if (isVaulted) {
                             val vaultedFile = File(record.filePath)
                             if (vaultedFile.exists() && vaultedFile.length() > 0L) {
@@ -88,8 +94,9 @@ class ScreenshotSyncOrchestrator(
                             }
                         }
                     } else {
-                        val resolvedCatId = record.targetCategoryId
-                        if (!resolvedCatId.isNullOrBlank() || isVaulted) {
+                        val isCategoryLocked = existingPhoto.isCategoryUserModified || record.isUserCategorized
+                        val resolvedCatId = if (isCategoryLocked) null else record.targetCategoryId
+                        if (!resolvedCatId.isNullOrBlank() || isVaulted || !record.eventDescription.isNullOrBlank()) {
                             val vaultedFile = if (isVaulted) File(record.filePath) else null
                             updates.add(
                                 PhotoAiMetadataUpdate(
@@ -156,7 +163,10 @@ class ScreenshotSyncOrchestrator(
                     val currentCatId = photo.categoryIds.firstOrNull {
                         it.startsWith("cat_") || it in repository.categories.value.map { c -> c.id }
                     }
-                    val catNeedsUpdate = !record.targetCategoryId.isNullOrBlank() && currentCatId != record.targetCategoryId
+                    val isCategoryLocked = photo.isCategoryUserModified || record.isUserCategorized
+                    val catNeedsUpdate = !isCategoryLocked &&
+                        !record.targetCategoryId.isNullOrBlank() &&
+                        currentCatId != record.targetCategoryId
                     val pathNeedsUpdate = record.filePath.isEncryptedPath() && !photo.filePath.isEncryptedPath()
                     val metaNeedsUpdate = !record.eventDescription.isNullOrBlank() && photo.suggestedEventDescription != record.eventDescription
                     val isCompleted = record.status == QueueStatus.COMPLETED.name
@@ -174,7 +184,7 @@ class ScreenshotSyncOrchestrator(
                                 detectedIntent = record.detectedIntent ?: photo.detectedIntent,
                                 suggestedEventTitle = record.eventTitle ?: photo.suggestedEventTitle,
                                 suggestedEventDateMillis = record.eventDateMillis ?: photo.suggestedEventDateMillis,
-                                targetCategoryId = record.targetCategoryId ?: currentCatId,
+                                targetCategoryId = if (isCategoryLocked) null else (record.targetCategoryId ?: currentCatId),
                                 isProcessed = true,
                                 suggestedEventDescription = record.eventDescription ?: photo.suggestedEventDescription,
                                 semanticTags = record.tags?.split(" ")?.filter { it.isNotBlank() } ?: photo.semanticTags
@@ -220,27 +230,27 @@ class ScreenshotSyncOrchestrator(
     }
 
     private suspend fun performScanDevicePhotosInternal(scope: CoroutineScope) {
-        isLocalScanning.value = true
+        _isLocalScanning.value = true
         updateScanningState()
         val scanResult = scanDevicePhotosUseCase()
         if (scanResult.photos.isNotEmpty() || scanResult.folders.isNotEmpty()) {
-            isLocalScanning.value = false
+            _isLocalScanning.value = false
             updateScanningState()
             syncCompletedScreenshotsFromDb()
             ensureVectorsIndexed(forceReindex = false)
             launchOnDeviceTriage(scope)
         } else {
-            isLocalScanning.value = false
+            _isLocalScanning.value = false
             updateScanningState()
         }
     }
 
     suspend fun ensureVectorsIndexed(forceReindex: Boolean = false) = withContext(Dispatchers.IO) {
-        isVectorIndexing.value = true
+        _isVectorIndexing.value = true
         try {
             searchPhotosUseCase.ensureVectorsIndexed(forceReindex)
         } finally {
-            isVectorIndexing.value = false
+            _isVectorIndexing.value = false
         }
     }
 
@@ -259,6 +269,7 @@ class ScreenshotSyncOrchestrator(
 
             val cached = queueDao.getProcessedScreenshot(photo.id)
             if (cached != null && !cached.targetCategoryId.isNullOrBlank()) {
+                val isCategoryLocked = photo.isCategoryUserModified || cached.isUserCategorized
                 repository.updatePhotoAiMetadata(
                     photoId = photo.id,
                     isScreenshot = true,
@@ -266,7 +277,7 @@ class ScreenshotSyncOrchestrator(
                     detectedIntent = cached.detectedIntent,
                     suggestedEventTitle = cached.eventTitle,
                     suggestedEventDateMillis = cached.eventDateMillis,
-                    targetCategoryId = cached.targetCategoryId,
+                    targetCategoryId = if (isCategoryLocked) null else cached.targetCategoryId,
                     isProcessed = true,
                     suggestedEventDescription = cached.eventDescription,
                     semanticTags = cached.tags?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
@@ -279,7 +290,12 @@ class ScreenshotSyncOrchestrator(
 
             if (isCandidate && needsOcr) {
                 if (cached != null && !cached.scrubbedText.isNullOrBlank()) {
-                    val resolvedCatId = processingCoordinator.recheckWithCustomCategories(photo, cached)
+                    val isCategoryLocked = photo.isCategoryUserModified || cached.isUserCategorized
+                    val resolvedCatId = if (isCategoryLocked) {
+                        null
+                    } else {
+                        processingCoordinator.recheckWithCustomCategories(photo, cached)
+                    }
                     repository.updatePhotoAiMetadata(
                         photoId = photo.id,
                         isScreenshot = true,

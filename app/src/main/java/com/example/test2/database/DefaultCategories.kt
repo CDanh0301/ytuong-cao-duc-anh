@@ -1,11 +1,17 @@
 package com.example.test2.database
 
-object DefaultCategories {
-    const val EVENTS = "cat_events"
-    const val TO_BUY = "cat_tobuy"
-    const val READING = "cat_reading"
-    const val NATURE = "cat_nature"
-    const val PERSONAL = "cat_personal"
+import com.example.test2.shared.models.DefaultCategories as SharedDefaultCategories
 
-    val ALL_IDS = setOf(EVENTS, TO_BUY, READING, NATURE, PERSONAL)
+@Deprecated(
+    message = "Use com.example.test2.shared.models.DefaultCategories",
+    replaceWith = ReplaceWith("DefaultCategories", "com.example.test2.shared.models.DefaultCategories")
+)
+object DefaultCategories {
+    const val EVENTS = SharedDefaultCategories.EVENTS
+    const val TO_BUY = SharedDefaultCategories.TO_BUY
+    const val READING = SharedDefaultCategories.READING
+    const val NATURE = SharedDefaultCategories.NATURE
+    const val PERSONAL = SharedDefaultCategories.PERSONAL
+
+    val ALL_IDS: Set<String> = SharedDefaultCategories.ALL_IDS
 }

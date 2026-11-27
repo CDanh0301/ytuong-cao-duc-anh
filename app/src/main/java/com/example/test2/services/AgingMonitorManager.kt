@@ -1,11 +1,15 @@
 package com.example.test2.services
 
 import android.content.Context
-import android.content.SharedPreferences
+import com.example.test2.PhotoApp
+import com.example.test2.data.local.prefs.AgingPrefsDataSource
+import com.example.test2.di.AppModule
+import com.example.test2.di.AppViewModelFactory
 import com.example.test2.notifications.ScreenshotNotificationHelper
 import com.example.test2.shared.models.Photo
-import com.example.test2.shared.repository.PhotoRepository
+import com.example.test2.shared.repository.IPhotoRepository
 import com.example.test2.storage.AndroidFilePersistenceDriver
+import com.example.test2.storage.DeviceMediaScanner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -18,62 +22,75 @@ data class AgingCheckResult(
 
 object AgingMonitorManager {
 
-    private const val PREFS_NAME = "aging_monitor_prefs"
-    private const val KEY_LAST_NOTIFIED = "key_last_notified"
-    private const val KEY_LAST_CHECKED = "key_last_checked"
-    private const val KEY_LAST_CLUTTER_COUNT = "key_last_clutter_count"
-    private const val KEY_LAST_CLUTTER_BYTES = "key_last_clutter_bytes"
-
     // Throttling window: gentle periodic reminder, at most once every 24 hours
-    private const val NOTIFY_INTERVAL_MS = 24 * 60 * 60 * 1000L
+    const val NOTIFY_INTERVAL_MS = 24 * 60 * 60 * 1000L
 
-    private fun getPrefs(context: Context): SharedPreferences {
-        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    fun shouldSendDailyNotification(
+        clutterCount: Int,
+        lastNotifiedMillis: Long,
+        nowMillis: Long,
+        force: Boolean
+    ): Boolean {
+        if (clutterCount <= 0) return false
+        if (force || lastNotifiedMillis <= 0L) return true
+        return (nowMillis - lastNotifiedMillis) >= NOTIFY_INTERVAL_MS
+    }
+
+    fun isDueForDailyCheck(lastCheckedMillis: Long, nowMillis: Long): Boolean {
+        if (lastCheckedMillis <= 0L) return true
+        return (nowMillis - lastCheckedMillis) >= NOTIFY_INTERVAL_MS
     }
 
     /**
-     * Inspects stored photos and calculates clutter according to AgingSettings.
-     * Evaluates Free vs Pro rules:
-     * - Free: General retention cutoff (default 30 days)
-     * - Pro: Custom per-category retention overrides + Auto-archive processed screenshots
-     * Gently fires a notification if aging screenshots are found and throttling interval has elapsed.
+     * Inspects device screenshots (reconciling MediaStore if permission is granted without triggering AI/Vault)
+     * and counts screenshots strictly older than the configured retention period.
+     * Sends a daily notification with the exact count N if N > 0 and 24h have elapsed.
      */
     suspend fun checkAgingAndNotify(context: Context, force: Boolean = false): AgingCheckResult = withContext(Dispatchers.IO) {
+        val appContext = context.applicationContext
         val now = System.currentTimeMillis()
-        val repo = PhotoRepository(
-            persistenceDriver = AndroidFilePersistenceDriver(context),
-            scope = CoroutineScope(Dispatchers.IO)
-        )
-        repo.loadInitialData(now)
+        val repo: IPhotoRepository = if (appContext is PhotoApp) {
+            appContext.container.repository.also { it.awaitInitialLoad() }
+        } else {
+            AppModule.providePhotoRepository(
+                driver = AndroidFilePersistenceDriver(appContext),
+                scope = CoroutineScope(Dispatchers.IO)
+            ).also { it.loadInitialData(now) }
+        }
+
         repo.checkMonthlyQuotaReset(now)
-        val retentionDays = repo.agingSettings.value.retentionDays
+
+        if (AppViewModelFactory.hasStoragePermission(appContext)) {
+            val scanResult = DeviceMediaScanner(appContext).scanDeviceImages()
+            if (scanResult.photos.isNotEmpty() || scanResult.folders.isNotEmpty()) {
+                repo.syncDevicePhotos(scanResult.photos, scanResult.folders)
+            }
+        }
+
+        val isPro = repo.accountTier.value.isPro
+        val retentionDays = repo.agingSettings.value.effectiveDefaultRetentionDays(isPro)
         val agingPhotos = repo.getAgingPhotos(daysOld = retentionDays, nowMillis = now)
         val totalBytes = agingPhotos.sumOf { it.fileSizeBytes }
         val clutterCount = agingPhotos.size
 
-        // Record last check
-        val prefs = getPrefs(context)
-        prefs.edit().apply {
-            putLong(KEY_LAST_CHECKED, now)
-            putInt(KEY_LAST_CLUTTER_COUNT, clutterCount)
-            putLong(KEY_LAST_CLUTTER_BYTES, totalBytes)
-            apply()
-        }
+        val prefsDataSource = AgingPrefsDataSource(appContext)
+        prefsDataSource.recordCheck(now, clutterCount, totalBytes)
 
         var notificationSent = false
         if (clutterCount > 0) {
-            val lastNotified = prefs.getLong(KEY_LAST_NOTIFIED, 0L)
-            val shouldNotify = force || (now - lastNotified >= NOTIFY_INTERVAL_MS)
-
-            if (shouldNotify) {
+            val lastNotified = prefsDataSource.getLastNotifiedMillis()
+            if (shouldSendDailyNotification(clutterCount, lastNotified, now, force)) {
                 ScreenshotNotificationHelper.showAgingNotification(
-                    context = context,
+                    context = appContext,
                     clutterCount = clutterCount,
-                    reclaimableBytes = totalBytes
+                    reclaimableBytes = totalBytes,
+                    retentionDays = retentionDays
                 )
-                prefs.edit().putLong(KEY_LAST_NOTIFIED, now).apply()
+                prefsDataSource.setLastNotifiedMillis(now)
                 notificationSent = true
             }
+        } else {
+            ScreenshotNotificationHelper.cancelAgingNotification(appContext)
         }
 
         AgingCheckResult(
@@ -83,14 +100,19 @@ object AgingMonitorManager {
         )
     }
 
+    suspend fun checkAgingIfDue(context: Context): AgingCheckResult? {
+        val now = System.currentTimeMillis()
+        val lastChecked = getLastCheckedInfo(context).first
+        return if (isDueForDailyCheck(lastChecked, now)) {
+            checkAgingAndNotify(context, force = false)
+        } else {
+            null
+        }
+    }
+
     /**
      * Returns (lastCheckedMillis, lastClutterCount, lastClutterBytes) for UI status display.
      */
-    fun getLastCheckedInfo(context: Context): Triple<Long, Int, Long> {
-        val prefs = getPrefs(context)
-        val lastChecked = prefs.getLong(KEY_LAST_CHECKED, 0L)
-        val clutterCount = prefs.getInt(KEY_LAST_CLUTTER_COUNT, 0)
-        val clutterBytes = prefs.getLong(KEY_LAST_CLUTTER_BYTES, 0L)
-        return Triple(lastChecked, clutterCount, clutterBytes)
-    }
+    fun getLastCheckedInfo(context: Context): Triple<Long, Int, Long> =
+        AgingPrefsDataSource(context).getLastCheckedInfo()
 }

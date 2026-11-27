@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -13,22 +12,21 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Label
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -51,14 +49,12 @@ import com.example.test2.notifications.ScreenshotNotificationHelper
 import com.example.test2.presentation.categories.CategoriesViewModel
 import com.example.test2.presentation.gallery.GalleryViewModel
 import com.example.test2.presentation.housekeeping.HousekeepingViewModel
+import com.example.test2.presentation.vault.VaultUiEvent
 import com.example.test2.presentation.vault.VaultViewModel
-import com.example.test2.services.AgingJobScheduler
-import com.example.test2.services.ScreenshotJobScheduler
-import com.example.test2.services.ScreenshotWatcherService
-import com.example.test2.shared.models.ActionCardType
 import com.example.test2.ui.ActionCardIntentHelper
 import com.example.test2.ui.AppTab
 import com.example.test2.ui.PhotoAppViewModel
+import com.example.test2.ui.SystemBridgeHelper
 import com.example.test2.ui.screens.AllFilesAccessDialog
 import com.example.test2.ui.screens.AppLockScreen
 import com.example.test2.ui.screens.CategoriesScreen
@@ -76,8 +72,13 @@ import com.example.test2.ui.screens.RenameCategoryDialog
 import com.example.test2.ui.screens.RestoreProgressDialog
 import com.example.test2.ui.screens.RetroactiveCategoryDialog
 import com.example.test2.ui.screens.RetroactiveScanningDialog
+import com.example.test2.ui.screens.SettingsScreen
+import com.example.test2.ui.components.LiquidWaveBottomBar
+import com.example.test2.ui.theme.AppColors
 import com.example.test2.ui.theme.Test2Theme
 import com.example.test2.widget.PhotoSearchWidgetProvider
+import com.example.test2.widget.PhotoSearchWidgetUpdater
+import com.example.test2.search.QuickSearchActivity
 
 class MainActivity : FragmentActivity() {
     private val viewModelFactory by lazy { AppViewModelFactory(application) }
@@ -90,9 +91,6 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleIntent(intent)
-        ScreenshotJobScheduler.schedule(this)
-        AgingJobScheduler.schedule(this)
-        ScreenshotWatcherService.start(this)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.light(
                 android.graphics.Color.TRANSPARENT,
@@ -111,13 +109,25 @@ class MainActivity : FragmentActivity() {
                 val categoriesState by categoriesViewModel.uiState.collectAsState()
                 val housekeepingState by housekeepingViewModel.uiState.collectAsState()
 
-                val photos by galleryViewModel.photos.collectAsState()
-                val folders by galleryViewModel.folders.collectAsState()
-                val categories by galleryViewModel.categories.collectAsState()
-                val accountTier by galleryViewModel.accountTier.collectAsState()
-                val agingSettings by housekeepingViewModel.agingSettings.collectAsState()
-                val agingPhotos = remember(photos, agingSettings) {
-                    housekeepingViewModel.getAgingScreenshots()
+                LaunchedEffect(galleryState.error) {
+                    galleryState.error?.let { msg ->
+                        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
+                        galleryViewModel.dismissError()
+                    }
+                }
+
+                LaunchedEffect(categoriesState.error) {
+                    categoriesState.error?.let { msg ->
+                        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
+                        categoriesViewModel.dismissError()
+                    }
+                }
+
+                LaunchedEffect(housekeepingState.error) {
+                    housekeepingState.error?.let { msg ->
+                        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
+                        housekeepingViewModel.dismissError()
+                    }
                 }
 
                 LaunchedEffect(vaultState.showRestoreSuccessBanner) {
@@ -131,6 +141,25 @@ class MainActivity : FragmentActivity() {
                     vaultState.showVaultPermissionDeniedBanner?.let { msg ->
                         Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
                         vaultViewModel.dismissVaultPermissionDeniedBanner()
+                    }
+                }
+
+                LaunchedEffect(vaultViewModel) {
+                    vaultViewModel.events.collect { event ->
+                        when (event) {
+                            VaultUiEvent.RequestBiometricUnlock -> {
+                                SystemBridgeHelper.authenticateWithBiometrics(
+                                    activity = this@MainActivity,
+                                    onSuccess = { vaultViewModel.unlockApp() }
+                                )
+                            }
+                            VaultUiEvent.OpenAllFilesSettings -> {
+                                SystemBridgeHelper.openManageAllFilesSettings(this@MainActivity)
+                            }
+                            VaultUiEvent.OpenDeviceLockSettings -> {
+                                SystemBridgeHelper.openDeviceLockSettings(this@MainActivity)
+                            }
+                        }
                     }
                 }
 
@@ -171,6 +200,9 @@ class MainActivity : FragmentActivity() {
                                     viewModel.onResumeScan()
                                     viewModel.ensureVectorsIndexed()
                                 }
+                                housekeepingViewModel.refreshAgingScreenshots(
+                                    runDailyCatchUp = viewModel.hasStoragePermission.value
+                                )
                             }
                             Lifecycle.Event.ON_STOP -> {
                                 if (vaultViewModel.uiState.value.isVaultEnabled) {
@@ -190,191 +222,138 @@ class MainActivity : FragmentActivity() {
                     contract = ActivityResultContracts.PickMultipleVisualMedia()
                 ) { uris ->
                     if (uris.isNotEmpty()) {
-                        galleryViewModel.importPhotos(uris)
+                        galleryViewModel.importPhotos(uris.map { it.toString() })
                     }
                 }
 
                 if (vaultState.isVaultEnabled && !vaultState.isAppUnlocked) {
                     AppLockScreen(
-                        onUnlockClick = {
-                            vaultViewModel.authenticate(
-                                activity = this@MainActivity,
-                                onSuccess = { vaultViewModel.unlockApp() },
-                                onError = { errorCode, _ ->
-                                    if (errorCode == androidx.biometric.BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL) {
-                                        Toast.makeText(
-                                            this@MainActivity,
-                                            "Thiết bị chưa cài đặt mã khóa màn hình (PIN/Vân tay). Vui lòng thiết lập trong Cài đặt của máy.",
-                                            Toast.LENGTH_LONG
-                                        ).show()
-                                    }
-                                }
-                            )
-                        },
+                        onUnlockClick = { vaultViewModel.requestBiometricUnlock() },
                         onBackPressed = { finish() }
                     )
                 } else {
                     Scaffold(
                         modifier = Modifier.fillMaxSize(),
+                        containerColor = AppColors.CanvasCream,
                         contentWindowInsets = WindowInsets.statusBars,
                         bottomBar = {
-                            NavigationBar(
-                                containerColor = Color.White,
-                                tonalElevation = 8.dp
-                            ) {
-                                NavigationBarItem(
-                                    selected = mainState.activeTab == AppTab.PHOTOS,
-                                    onClick = { viewModel.setActiveTab(AppTab.PHOTOS) },
-                                    icon = {
-                                        Icon(
-                                            Icons.Default.Photo,
-                                            contentDescription = "Ảnh",
-                                            modifier = Modifier.size(22.dp)
-                                        )
-                                    },
-                                    label = {
-                                        Text(
-                                            "Ảnh",
-                                            fontSize = 11.sp,
-                                            fontWeight = if (mainState.activeTab == AppTab.PHOTOS) FontWeight.Bold else FontWeight.Medium
-                                        )
-                                    },
-                                    colors = NavigationBarItemDefaults.colors(
-                                        selectedIconColor = Color(0xFF2563EB),
-                                        selectedTextColor = Color(0xFF2563EB),
-                                        indicatorColor = Color(0xFFEFF6FF),
-                                        unselectedIconColor = Color(0xFF64748B),
-                                        unselectedTextColor = Color(0xFF64748B)
-                                    )
-                                )
-
-                                NavigationBarItem(
-                                    selected = mainState.activeTab == AppTab.CATEGORIES,
-                                    onClick = { viewModel.setActiveTab(AppTab.CATEGORIES) },
-                                    icon = {
-                                        Icon(
-                                            Icons.AutoMirrored.Filled.Label,
-                                            contentDescription = "Danh mục",
-                                            modifier = Modifier.size(22.dp)
-                                        )
-                                    },
-                                    label = {
-                                        Text(
-                                            "Danh mục",
-                                            fontSize = 11.sp,
-                                            fontWeight = if (mainState.activeTab == AppTab.CATEGORIES) FontWeight.Bold else FontWeight.Medium
-                                        )
-                                    },
-                                    colors = NavigationBarItemDefaults.colors(
-                                        selectedIconColor = Color(0xFF2563EB),
-                                        selectedTextColor = Color(0xFF2563EB),
-                                        indicatorColor = Color(0xFFEFF6FF),
-                                        unselectedIconColor = Color(0xFF64748B),
-                                        unselectedTextColor = Color(0xFF64748B)
-                                    )
-                                )
-
-                                NavigationBarItem(
-                                    selected = mainState.activeTab == AppTab.CLEANER,
-                                    onClick = { viewModel.setActiveTab(AppTab.CLEANER) },
-                                    icon = {
-                                        Icon(
-                                            Icons.Default.AutoAwesome,
-                                            contentDescription = "Trợ lý",
-                                            modifier = Modifier.size(22.dp)
-                                        )
-                                    },
-                                    label = {
-                                        Text(
-                                            "Trợ lý",
-                                            fontSize = 11.sp,
-                                            fontWeight = if (mainState.activeTab == AppTab.CLEANER) FontWeight.Bold else FontWeight.Medium
-                                        )
-                                    },
-                                    colors = NavigationBarItemDefaults.colors(
-                                        selectedIconColor = Color(0xFF2563EB),
-                                        selectedTextColor = Color(0xFF2563EB),
-                                        indicatorColor = Color(0xFFEFF6FF),
-                                        unselectedIconColor = Color(0xFF64748B),
-                                        unselectedTextColor = Color(0xFF64748B)
-                                    )
-                                )
-                            }
+                            LiquidWaveBottomBar(
+                                activeTab = mainState.activeTab,
+                                onSelectTab = { viewModel.setActiveTab(it) }
+                            )
                         }
                     ) { innerPadding ->
                         Box(modifier = Modifier.padding(innerPadding)) {
-                            when (mainState.activeTab) {
-                                AppTab.PHOTOS -> {
-                                    PhotoGalleryScreen(
-                                        photos = galleryState.photos,
-                                        allPhotosCount = photos.size,
-                                        folders = folders,
-                                        categories = categories,
-                                        currentFilter = galleryState.activeFilter,
-                                        hasStoragePermission = mainState.hasStoragePermission,
-                                        isScanning = mainState.isScanning,
-                                        pendingAiCount = mainState.pendingAiCount,
-                                        accountTier = accountTier,
-                                        displayMode = galleryState.displayMode,
-                                        onDisplayModeChange = { galleryViewModel.setDisplayMode(it) },
-                                        onRequestPermission = { permissionLauncher.launch(permissionsToRequest) },
-                                        onPhotoClick = { photo -> galleryViewModel.viewPhoto(photo) },
-                                        onToggleFavorite = { photoId -> galleryViewModel.toggleFavorite(photoId) },
-                                        onToggleFavoriteFilter = { galleryViewModel.toggleFavoriteFilter() },
-                                        onSelectFolder = { galleryViewModel.filterByFolder(it) },
-                                        onSelectCategory = { galleryViewModel.filterByCategory(it) },
-                                        onSearchChange = { galleryViewModel.setSearchQuery(it) },
-                                        onClearFilters = { galleryViewModel.clearFilters() },
-                                        activeActionCardType = galleryState.activeActionCardType,
-                                        actionCardPhotoCounts = galleryState.actionCardPhotoCounts,
-                                        onSelectActionCardType = { galleryViewModel.setActionCardFilter(it) },
-                                        semanticMatchScores = galleryState.semanticMatchScores,
-                                        isVectorIndexing = galleryState.isVectorIndexing,
-                                        onToggleTier = { galleryViewModel.toggleUserTier(it) },
-                                        onAddPhotoClick = {
-                                            photoPickerLauncher.launch(
-                                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                            )
-                                        }
-                                    )
-                                }
-                                AppTab.CATEGORIES -> {
-                                    CategoriesScreen(
-                                        categories = categories,
-                                        photos = photos,
-                                        isPro = accountTier.isPro,
-                                        onSelectCategory = { categoryId -> categoriesViewModel.selectCategory(categoryId) },
-                                        onCreateCategoryClick = { categoriesViewModel.openCreateCategoryDialog() },
-                                        onEditCategoryClick = { category -> categoriesViewModel.setCategoryToEdit(category) },
-                                        onDeleteCategoryClick = { category -> categoriesViewModel.setCategoryToDelete(category) },
-                                        onAutoCategorizeClick = { category -> categoriesViewModel.triggerRetroactiveCategoryScan(category) }
-                                    )
-                                }
-                                AppTab.CLEANER -> {
-                                    HousekeepingScreen(
-                                        photos = photos,
-                                        accountTier = accountTier,
-                                        agingSettings = agingSettings,
-                                        agingPhotos = agingPhotos,
-                                        categories = categories,
-                                        isVaultEnabled = vaultState.isVaultEnabled,
-                                        onToggleVault = { vaultViewModel.setVaultEnabled(it) },
-                                        onRequestRestorePhotos = { vaultViewModel.requestDisableVault() },
-                                        onToggleTier = { galleryViewModel.toggleUserTier(it) },
-                                        onCleanClutter = { housekeepingViewModel.cleanAgingScreenshots(it) },
-                                        onDeleteSinglePhoto = { galleryViewModel.setPhotoToDelete(it) },
-                                        onAddToCalendar = { photo ->
-                                            if (ActionCardIntentHelper.launchCalendarForPhoto(this@MainActivity, photo)) {
-                                                housekeepingViewModel.markReminderCreated(photo.id)
+                            AnimatedContent(
+                                targetState = mainState.activeTab,
+                                transitionSpec = {
+                                    val dir = if (targetState.ordinal >= initialState.ordinal) 1 else -1
+                                    (slideInHorizontally(animationSpec = tween(280)) { it / 6 * dir } +
+                                        fadeIn(animationSpec = tween(260))) togetherWith
+                                        (slideOutHorizontally(animationSpec = tween(240)) { -it / 6 * dir } +
+                                            fadeOut(animationSpec = tween(220)))
+                                },
+                                label = "mainTabTransition"
+                            ) { activeTab ->
+                                when (activeTab) {
+                                    AppTab.PHOTOS -> {
+                                        PhotoGalleryScreen(
+                                            photos = galleryState.photos,
+                                            allPhotosCount = galleryState.allPhotosCount,
+                                            folders = galleryState.folders,
+                                            categories = galleryState.categories,
+                                            currentFilter = galleryState.activeFilter,
+                                            hasStoragePermission = mainState.hasStoragePermission,
+                                            isScanning = mainState.isScanning,
+                                            pendingAiCount = mainState.pendingAiCount,
+                                            accountTier = galleryState.accountTier,
+                                            displayMode = galleryState.displayMode,
+                                            onDisplayModeChange = { galleryViewModel.setDisplayMode(it) },
+                                            onRequestPermission = { permissionLauncher.launch(permissionsToRequest) },
+                                            onPhotoClick = { photo -> galleryViewModel.viewPhoto(photo) },
+                                            onToggleFavorite = { photoId -> galleryViewModel.toggleFavorite(photoId) },
+                                            onToggleFavoriteFilter = { galleryViewModel.toggleFavoriteFilter() },
+                                            onSelectFolder = { galleryViewModel.filterByFolder(it) },
+                                            onSelectCategory = { galleryViewModel.filterByCategory(it) },
+                                            onSearchChange = { galleryViewModel.setSearchQuery(it) },
+                                            onClearFilters = { galleryViewModel.clearFilters() },
+                                            activeActionCardType = galleryState.activeActionCardType,
+                                            actionCardPhotoCounts = galleryState.actionCardPhotoCounts,
+                                            onSelectActionCardType = { galleryViewModel.setActionCardFilter(it) },
+                                            semanticMatchScores = galleryState.semanticMatchScores,
+                                            isVectorIndexing = galleryState.isVectorIndexing,
+                                            onToggleTier = { galleryViewModel.toggleUserTier(it) },
+                                            onAddPhotoClick = {
+                                                photoPickerLauncher.launch(
+                                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                                )
                                             }
-                                        },
-                                        onPhotoClick = { photo -> galleryViewModel.viewPhoto(photo) },
-                                        onSetCategoryRetentionRule = { catId, days ->
-                                            housekeepingViewModel.setCategoryRetentionRule(catId, days)
-                                        },
-                                        agingMonitorInfo = housekeepingState.agingMonitorInfo,
-                                        onRunAgingScanNow = { housekeepingViewModel.runAgingScanNow() }
-                                    )
+                                        )
+                                    }
+                                    AppTab.CATEGORIES -> {
+                                        CategoriesScreen(
+                                            categories = categoriesState.categories,
+                                            photos = categoriesState.photos,
+                                            isPro = categoriesState.isPro,
+                                            onSelectCategory = { categoryId -> categoriesViewModel.selectCategory(categoryId) },
+                                            onCreateCategoryClick = { categoriesViewModel.openCreateCategoryDialog() },
+                                            onEditCategoryClick = { category -> categoriesViewModel.setCategoryToEdit(category) },
+                                            onDeleteCategoryClick = { category -> categoriesViewModel.setCategoryToDelete(category) },
+                                            onAutoCategorizeClick = { category -> categoriesViewModel.triggerRetroactiveCategoryScan(category) }
+                                        )
+                                    }
+                                    AppTab.CLEANER -> {
+                                        HousekeepingScreen(
+                                            photos = housekeepingState.photos,
+                                            accountTier = housekeepingState.accountTier,
+                                            agingSettings = housekeepingState.agingSettings,
+                                            agingPhotos = housekeepingState.agingPhotos,
+                                            categories = housekeepingState.categories,
+                                            isEventsExpanded = housekeepingState.isEventsExpanded,
+                                            onToggleEventsExpanded = { housekeepingViewModel.toggleEventsExpanded() },
+                                            isClutterExpanded = housekeepingState.isClutterExpanded,
+                                            onToggleClutterExpanded = { housekeepingViewModel.toggleClutterExpanded() },
+                                            onCleanClutter = { housekeepingViewModel.cleanAgingScreenshots(it) },
+                                            onDeleteSinglePhoto = { galleryViewModel.setPhotoToDelete(it) },
+                                            onAddToCalendar = { photo ->
+                                                if (ActionCardIntentHelper.launchCalendarForPhoto(this@MainActivity, photo)) {
+                                                    housekeepingViewModel.markReminderCreated(photo.id)
+                                                }
+                                            },
+                                            onPhotoClick = { photo -> galleryViewModel.viewPhoto(photo) },
+                                            onSetCategoryRetentionRule = { catId, days ->
+                                                housekeepingViewModel.setCategoryRetentionRule(catId, days)
+                                            },
+                                            onSetDefaultRetentionDays = { days ->
+                                                housekeepingViewModel.setDefaultRetentionDays(days)
+                                            },
+                                            agingMonitorInfo = housekeepingState.agingMonitorInfo,
+                                            onRunAgingScanNow = { housekeepingViewModel.runAgingScanNow() }
+                                        )
+                                    }
+                                    AppTab.SETTINGS -> {
+                                        SettingsScreen(
+                                            accountTier = housekeepingState.accountTier,
+                                            isVaultEnabled = vaultState.isVaultEnabled,
+                                            protectedPhotosCount = vaultState.protectedPhotoCount,
+                                            onToggleTier = { galleryViewModel.toggleUserTier(it) },
+                                            onToggleVault = { vaultViewModel.setVaultEnabled(it) },
+                                            onRequestRestorePhotos = { vaultViewModel.requestDisableVault() },
+                                            onPinWidget = {
+                                                val pinned = PhotoSearchWidgetUpdater.requestPinWidget(this@MainActivity)
+                                                if (!pinned) {
+                                                    Toast.makeText(
+                                                        this@MainActivity,
+                                                        "Nhấn giữ màn hình chính → Widgets → MemoCap để thêm thanh tìm kiếm.",
+                                                        Toast.LENGTH_LONG
+                                                    ).show()
+                                                }
+                                            },
+                                            onOpenQuickSearch = {
+                                                startActivity(Intent(this@MainActivity, QuickSearchActivity::class.java))
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -384,8 +363,8 @@ class MainActivity : FragmentActivity() {
                         ImageViewerDialog(
                             photos = galleryState.photos,
                             initialPhotoId = photoId,
-                            folders = folders,
-                            categories = categories,
+                            folders = galleryState.folders,
+                            categories = galleryState.categories,
                             onDismiss = { galleryViewModel.closePhotoViewer() },
                             onOpenSettings = { photo -> galleryViewModel.openPhotoSettings(photo) },
                             onToggleFavorite = { photo -> galleryViewModel.toggleFavorite(photo.id) },
@@ -402,8 +381,8 @@ class MainActivity : FragmentActivity() {
                     galleryState.photoSettings?.let { photo ->
                         PhotoSettingsDialog(
                             photo = photo,
-                            folders = folders,
-                            categories = categories,
+                            folders = galleryState.folders,
+                            categories = galleryState.categories,
                             onDismiss = { galleryViewModel.closePhotoSettings() },
                             onSave = { title, description, folderId, categoryIds, isFav ->
                                 galleryViewModel.updatePhotoDetails(photo.id, title, description, folderId, categoryIds, isFav)
@@ -481,13 +460,7 @@ class MainActivity : FragmentActivity() {
 
                 if (vaultState.showAllFilesAccessDialog) {
                     AllFilesAccessDialog(
-                        onOpenSettings = {
-                            try {
-                                startActivity(vaultViewModel.getManageAllFilesIntent())
-                            } catch (_: Exception) {
-                            }
-                            vaultViewModel.dismissAllFilesAccessDialog()
-                        },
+                        onOpenSettings = { vaultViewModel.openAllFilesSettings() },
                         onDismiss = { vaultViewModel.cancelAllFilesAccessDialog() }
                     )
                 }
@@ -495,27 +468,25 @@ class MainActivity : FragmentActivity() {
                 if (vaultState.showRequireDeviceLockDialog) {
                     AlertDialog(
                         onDismissRequest = { vaultViewModel.dismissRequireDeviceLockDialog() },
-                        title = { Text("Yêu cầu Khóa màn hình", fontWeight = FontWeight.Bold) },
+                        containerColor = AppColors.SurfaceAlabaster,
+                        title = { Text("Yêu cầu Khóa màn hình", fontWeight = FontWeight.Bold, color = AppColors.DeepPineText) },
                         text = {
-                            Text("Để bảo vệ ảnh trong Két an toàn, thiết bị của bạn cần phải cài đặt sẵn Khóa màn hình (Mã PIN, Hình vẽ hoặc Vân tay). Vui lòng thiết lập khóa máy trước khi bật tính năng này.")
+                            Text(
+                                "Để bảo vệ ảnh trong Két an toàn, thiết bị của bạn cần phải cài đặt sẵn Khóa màn hình (Mã PIN, Hình vẽ hoặc Vân tay). Vui lòng thiết lập khóa máy trước khi bật tính năng này.",
+                                color = AppColors.WarmTaupeText
+                            )
                         },
                         confirmButton = {
                             Button(
-                                onClick = {
-                                    vaultViewModel.dismissRequireDeviceLockDialog()
-                                    try {
-                                        startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
-                                    } catch (_: Exception) {
-                                        startActivity(Intent(Settings.ACTION_SETTINGS))
-                                    }
-                                }
+                                onClick = { vaultViewModel.openDeviceLockSettings() },
+                                colors = ButtonDefaults.buttonColors(containerColor = AppColors.ForestTeal)
                             ) {
                                 Text("Cài đặt khóa máy")
                             }
                         },
                         dismissButton = {
                             TextButton(onClick = { vaultViewModel.dismissRequireDeviceLockDialog() }) {
-                                Text("Để sau")
+                                Text("Để sau", color = AppColors.WarmTaupeText)
                             }
                         }
                     )
@@ -529,13 +500,10 @@ class MainActivity : FragmentActivity() {
                 }
 
                 if (vaultState.showDisableVaultDialog) {
-                    val protectedCount = photos.count {
-                        it.filePath.endsWith(".enc") || (it.isScreenshot && !it.filePath.startsWith("content://"))
-                    }
                     DisableVaultConfirmDialog(
                         onConfirm = { vaultViewModel.restoreAllVaultedPhotos() },
                         onDismiss = { vaultViewModel.dismissDisableVaultDialog() },
-                        photoCount = protectedCount
+                        photoCount = vaultState.protectedPhotoCount
                     )
                 }
 
@@ -557,26 +525,13 @@ class MainActivity : FragmentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         val photoId = intent?.getStringExtra(ScreenshotNotificationHelper.EXTRA_PHOTO_ID)
-        if (!photoId.isNullOrBlank()) {
-            viewModel.viewPhotoById(photoId)
-        }
         val openHousekeeping = intent?.getBooleanExtra(ScreenshotNotificationHelper.EXTRA_OPEN_HOUSEKEEPING, false) == true ||
             intent?.getStringExtra(ScreenshotNotificationHelper.EXTRA_TAB) == "housekeeping"
-        if (openHousekeeping) {
-            viewModel.setActiveTab(AppTab.CLEANER)
-        }
-
         val widgetActionCardName = intent?.getStringExtra(PhotoSearchWidgetProvider.EXTRA_ACTION_CARD_TYPE)
-        if (!widgetActionCardName.isNullOrBlank()) {
-            val cardType = try {
-                ActionCardType.valueOf(widgetActionCardName)
-            } catch (_: Exception) {
-                null
-            }
-            if (cardType != null) {
-                viewModel.setActiveTab(AppTab.PHOTOS)
-                galleryViewModel.setActionCardFilter(cardType)
-            }
-        }
+        viewModel.handleLaunchExtras(
+            photoId = photoId,
+            openHousekeeping = openHousekeeping,
+            widgetActionCardName = widgetActionCardName
+        )
     }
 }

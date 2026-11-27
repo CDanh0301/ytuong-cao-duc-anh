@@ -104,7 +104,8 @@ class ActionCardDaoImpl(
                     )
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed getting action cards for $photoId", e)
         }
         return result
     }
@@ -123,7 +124,8 @@ class ActionCardDaoImpl(
                     ids.add(it.getString(0))
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed querying photo IDs for action card type $type", e)
         }
         return ids
     }
@@ -142,11 +144,13 @@ class ActionCardDaoImpl(
                     try {
                         val type = ActionCardType.valueOf(typeStr)
                         counts[type] = count
-                    } catch (_: Exception) {
+                    } catch (e: Exception) {
+                        logError("Unknown action card type '$typeStr'", e)
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed counting action cards by type", e)
         }
         return counts
     }
@@ -155,7 +159,8 @@ class ActionCardDaoImpl(
         return try {
             val db = dbProvider.writableDatabase
             db.delete(TABLE_ACTION_CARDS, "photo_id = ?", arrayOf(photoId)) > 0
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed deleting action cards for $photoId", e)
             false
         }
     }
@@ -164,7 +169,8 @@ class ActionCardDaoImpl(
         try {
             val db = dbProvider.writableDatabase
             db.delete(TABLE_ACTION_CARDS, "type = ?", arrayOf("EVENT"))
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed cleaning orphaned action cards", e)
         }
     }
 

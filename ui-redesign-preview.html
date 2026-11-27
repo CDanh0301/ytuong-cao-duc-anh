@@ -1,0 +1,3306 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MemoCap — UI Redesign Review</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      /* Editorial Organic Palette (Inspired by Reference Image 1) */
+      --bg-studio: #EAE4D8;
+      --bg-canvas: #F7F3EB;
+      --bg-surface: #FFFDFA;
+      --bg-sand: #EAE2D4;
+      --bg-sand-soft: #F2ECE1;
+      --border-sand: #E3DACB;
+      --ink-primary: #172B2A;
+      --ink-secondary: #666A63;
+      --ink-muted: #939289;
+      --teal: #1E4240;
+      --teal-dark: #14302E;
+      --teal-soft: #E3ECEA;
+      --ochre: #B89054;
+      --ochre-light: #F7EFE2;
+      --sage: #7E8D78;
+      --sage-light: #E9EFE6;
+      --plum: #7A5C7E;
+      --plum-light: #F2ECF3;
+      --terracotta: #C2593F;
+      --terracotta-light: #FBEDE9;
+
+      /* Interactive Tweaker Vars */
+      --orb-top: #2B5754;
+      --orb-bottom: #163331;
+      --orb-shadow: rgba(30, 66, 64, 0.36);
+
+      --font-serif: 'Fraunces', 'Georgia', 'Times New Roman', serif;
+      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    button:focus,
+    button:focus-visible {
+      outline: none;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font-sans);
+      background:
+        radial-gradient(circle at 18% 15%, rgba(184, 144, 84, 0.14), transparent 42%),
+        radial-gradient(circle at 85% 82%, rgba(30, 66, 64, 0.10), transparent 45%),
+        var(--bg-studio);
+      color: var(--ink-primary);
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 24px 20px;
+      gap: 28px;
+    }
+
+    .studio-layout {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: flex-start;
+      gap: 32px;
+      max-width: 1220px;
+      width: 100%;
+    }
+
+    /* ============ PHONE MOCKUP ============ */
+    .phone-stage {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      position: sticky;
+      top: 20px;
+    }
+
+    .phone-bezel {
+      width: 392px;
+      height: 824px;
+      background: #141615;
+      border-radius: 52px;
+      padding: 12px;
+      box-shadow:
+        0 32px 70px rgba(23, 43, 42, 0.24),
+        0 8px 22px rgba(23, 43, 42, 0.14),
+        inset 0 0 0 2px #2B2F2D;
+      position: relative;
+      user-select: none;
+    }
+
+    .phone-screen {
+      width: 100%;
+      height: 100%;
+      background: var(--bg-canvas);
+      border-radius: 41px;
+      overflow: hidden;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .status-bar {
+      height: 44px;
+      padding: 12px 24px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--ink-primary);
+      flex-shrink: 0;
+      position: relative;
+      z-index: 25;
+    }
+
+    .dynamic-island {
+      width: 104px;
+      height: 27px;
+      background: #101211;
+      border-radius: 16px;
+      position: absolute;
+      left: 50%;
+      top: 9px;
+      transform: translateX(-50%);
+    }
+
+    .status-icons {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .app-viewport {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .tab-page {
+      position: absolute;
+      inset: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding-bottom: 102px;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateX(18px);
+      transition: opacity 0.28s cubic-bezier(0.22, 1, 0.36, 1), transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+      scrollbar-width: none;
+    }
+
+    .tab-page::-webkit-scrollbar {
+      display: none;
+    }
+
+    .tab-page.active {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateX(0);
+    }
+
+    .tab-page.exit-left {
+      transform: translateX(-18px);
+    }
+
+    /* ============ EDITORIAL HEADER (IMAGE 1 STYLE) ============ */
+    .screen-header {
+      padding: 10px 20px 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .header-title-wrap {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .header-kicker {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ochre);
+      margin-bottom: 2px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .header-title {
+      font-family: var(--font-serif);
+      font-size: 28px;
+      font-weight: 600;
+      line-height: 1.12;
+      letter-spacing: -0.02em;
+      color: var(--teal);
+      margin: 0;
+    }
+
+    .header-subtitle {
+      font-size: 12.5px;
+      color: var(--ink-secondary);
+      margin: 4px 0 0;
+      line-height: 1.35;
+    }
+
+    .header-dash {
+      width: 24px;
+      height: 2.5px;
+      background: var(--ochre);
+      border-radius: 99px;
+      margin-top: 8px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding-top: 4px;
+    }
+
+    .icon-pill-btn {
+      width: 38px;
+      height: 38px;
+      border-radius: 14px;
+      border: 1px solid var(--border-sand);
+      background: var(--bg-surface);
+      color: var(--ink-primary);
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      transition: all 0.18s ease;
+      box-shadow: 0 2px 6px rgba(23, 43, 42, 0.04);
+    }
+
+    .icon-pill-btn:hover {
+      transform: translateY(-1px);
+      border-color: var(--ochre);
+    }
+
+    .icon-pill-btn.fav-active {
+      background: var(--terracotta-light);
+      border-color: rgba(194, 89, 63, 0.4);
+      color: var(--terracotta);
+    }
+
+    .icon-pill-btn.primary {
+      background: var(--teal);
+      border-color: var(--teal);
+      color: #FFFDFA;
+    }
+
+    .btn-editorial {
+      border: none;
+      background: var(--teal);
+      color: #FFFDFA;
+      font-family: var(--font-sans);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 9px 13px;
+      border-radius: 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(30, 66, 64, 0.16);
+      transition: transform 0.15s ease, opacity 0.15s ease;
+    }
+
+    .btn-editorial:active {
+      transform: scale(0.97);
+    }
+
+    .btn-editorial.ochre {
+      background: var(--ochre);
+      box-shadow: 0 4px 12px rgba(184, 144, 84, 0.24);
+    }
+
+    .btn-editorial.muted {
+      background: var(--bg-sand);
+      color: var(--ink-primary);
+      box-shadow: none;
+      border: 1px solid var(--border-sand);
+    }
+
+    .btn-editorial.danger-soft {
+      background: var(--terracotta-light);
+      color: var(--terracotta);
+      box-shadow: none;
+      border: 1px solid rgba(194, 89, 63, 0.25);
+    }
+
+    /* ============ GALLERY TAB CONTROLS ============ */
+    .search-box-wrap {
+      padding: 0 18px 8px;
+    }
+
+    .search-input-shell {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-sand);
+      border-radius: 16px;
+      padding: 10px 13px;
+      box-shadow: 0 2px 10px rgba(23, 43, 42, 0.03);
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .search-input-shell:focus-within {
+      border-color: var(--teal);
+      box-shadow: 0 4px 14px rgba(30, 66, 64, 0.08);
+    }
+
+    .search-input-shell input {
+      border: none;
+      outline: none;
+      background: transparent;
+      flex: 1;
+      font-family: var(--font-sans);
+      font-size: 13px;
+      color: var(--ink-primary);
+      min-width: 0;
+    }
+
+    .search-input-shell input::placeholder {
+      color: var(--ink-muted);
+    }
+
+    .clear-search-btn {
+      border: none;
+      background: var(--bg-sand);
+      color: var(--ink-secondary);
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .semantic-status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 2px 18px 8px;
+      gap: 8px;
+    }
+
+    .semantic-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid transparent;
+    }
+
+    .semantic-pill.pro {
+      background: var(--plum-light);
+      border-color: rgba(122, 92, 126, 0.25);
+      color: var(--plum);
+    }
+
+    .semantic-pill.free {
+      background: var(--bg-sand-soft);
+      border-color: var(--border-sand);
+      color: var(--ink-secondary);
+    }
+
+    .pro-tag {
+      background: var(--ochre);
+      color: #fff;
+      font-size: 9px;
+      font-weight: 800;
+      padding: 1px 5px;
+      border-radius: 5px;
+      letter-spacing: 0.04em;
+    }
+
+    .filter-scroll {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 2px 18px 10px;
+      scrollbar-width: none;
+    }
+
+    .filter-scroll::-webkit-scrollbar {
+      display: none;
+    }
+
+    .action-pill {
+      flex-shrink: 0;
+      border: 1px solid var(--border-sand);
+      background: var(--bg-surface);
+      color: var(--ink-primary);
+      border-radius: 99px;
+      padding: 7px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: var(--font-sans);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      transition: all 0.18s ease;
+    }
+
+    .action-pill .count-dot {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 99px;
+      background: var(--bg-sand);
+      color: var(--ink-secondary);
+    }
+
+    .action-pill.active {
+      background: var(--teal);
+      border-color: var(--teal);
+      color: #FFFDFA;
+      box-shadow: 0 4px 10px rgba(30, 66, 64, 0.16);
+    }
+
+    .action-pill.active .count-dot {
+      background: rgba(255, 255, 255, 0.22);
+      color: #FFFDFA;
+    }
+
+    .action-pill[data-type="ADDRESS"].active {
+      background: var(--terracotta);
+      border-color: var(--terracotta);
+    }
+
+    .action-pill[data-type="PAYMENT"].active {
+      background: var(--ochre);
+      border-color: var(--ochre);
+    }
+
+    .action-pill[data-type="CONTACT"].active {
+      background: var(--sage);
+      border-color: var(--sage);
+    }
+
+    .info-banner {
+      margin: 0 18px 10px;
+      border-radius: 16px;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 12px;
+    }
+
+    .info-banner.filter {
+      background: var(--teal-soft);
+      border: 1px solid rgba(30, 66, 64, 0.18);
+      color: var(--teal);
+    }
+
+    .info-banner.quota {
+      background: var(--ochre-light);
+      border: 1px solid rgba(184, 144, 84, 0.35);
+      color: #6B4D1E;
+      align-items: flex-start;
+    }
+
+    .info-banner.permission {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-sand);
+      align-items: flex-start;
+    }
+
+    .info-banner.scanning {
+      background: var(--sage-light);
+      border: 1px solid rgba(126, 141, 120, 0.3);
+      color: var(--teal);
+      justify-content: center;
+      padding: 8px 12px;
+    }
+
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(30, 66, 64, 0.2);
+      border-top-color: var(--teal);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .gallery-toolbar {
+      padding: 4px 18px 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .gallery-toolbar-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--ink-primary);
+    }
+
+    .count-chip {
+      background: var(--bg-sand);
+      color: var(--ink-secondary);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 99px;
+    }
+
+    .display-switcher {
+      display: flex;
+      background: var(--bg-sand-soft);
+      border: 1px solid var(--border-sand);
+      border-radius: 12px;
+      padding: 3px;
+      gap: 2px;
+    }
+
+    .mode-btn {
+      width: 28px;
+      height: 28px;
+      border: none;
+      background: transparent;
+      border-radius: 9px;
+      color: var(--ink-secondary);
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+    }
+
+    .mode-btn.active {
+      background: var(--bg-surface);
+      color: var(--teal);
+      box-shadow: 0 1px 4px rgba(23, 43, 42, 0.10);
+    }
+
+    /* Photo Grids (Clean Image-Only Thumbnails, Zero Title/OCR Clutter) */
+    .photo-grid {
+      padding: 0 18px 16px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .photo-grid.BIG_PREVIEW {
+      grid-template-columns: repeat(2, 1fr);
+    }
+
+    .photo-grid.SMALL_PREVIEW {
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+    }
+
+    .photo-grid.LIST {
+      grid-template-columns: 1fr;
+    }
+
+    .photo-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-sand);
+      border-radius: 16px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: transform 0.18s ease, box-shadow 0.18s ease;
+      box-shadow: 0 2px 10px rgba(23, 43, 42, 0.03);
+    }
+
+    .photo-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 18px rgba(23, 43, 42, 0.08);
+    }
+
+    .photo-thumb-wrap {
+      position: relative;
+      aspect-ratio: 1 / 1;
+      background: var(--bg-sand);
+      overflow: hidden;
+    }
+
+    .photo-thumb-visual {
+      width: 100%;
+      height: 100%;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Subtle abstract screenshot wireframes (no text/OCR clutter!) */
+    .visual-wireframe {
+      width: 72%;
+      height: 68%;
+      border-radius: 12px;
+      background: rgba(255, 253, 250, 0.62);
+      border: 1px solid rgba(255, 255, 255, 0.72);
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      box-shadow: 0 6px 16px rgba(23, 43, 42, 0.05);
+    }
+
+    .wf-bar {
+      height: 6px;
+      border-radius: 99px;
+      background: rgba(30, 66, 64, 0.14);
+    }
+
+    .photo-fav-btn {
+      position: absolute;
+      top: 7px;
+      right: 7px;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(23, 43, 42, 0.42);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      z-index: 2;
+    }
+
+    .photo-fav-btn.active {
+      background: var(--bg-surface);
+      color: var(--terracotta);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.14);
+    }
+
+    .photo-vault-badge {
+      position: absolute;
+      top: 7px;
+      left: 7px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: rgba(20, 48, 46, 0.88);
+      color: #A7C4A0;
+      display: grid;
+      place-items: center;
+      z-index: 2;
+    }
+
+    .photo-semantic-badge {
+      position: absolute;
+      top: 7px;
+      left: 7px;
+      background: rgba(122, 92, 126, 0.92);
+      color: #fff;
+      font-size: 9px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 6px;
+      z-index: 2;
+    }
+
+    .photo-cat-overlay {
+      position: absolute;
+      bottom: 7px;
+      left: 7px;
+      display: flex;
+      gap: 4px;
+      max-width: calc(100% - 14px);
+      z-index: 2;
+    }
+
+    .photo-cat-chip {
+      background: rgba(23, 43, 42, 0.72);
+      color: #FFFDFA;
+      font-size: 9.5px;
+      font-weight: 600;
+      padding: 2.5px 7px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      white-space: nowrap;
+    }
+
+    .cat-dot {
+      width: 5.5px;
+      height: 5.5px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .photo-card-meta {
+      padding: 7px 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: var(--ink-secondary);
+    }
+
+    .photo-grid.SMALL_PREVIEW .photo-card {
+      border-radius: 10px;
+    }
+    .photo-grid.SMALL_PREVIEW .photo-card-meta,
+    .photo-grid.SMALL_PREVIEW .visual-wireframe {
+      display: none;
+    }
+    .photo-grid.SMALL_PREVIEW .photo-fav-btn {
+      width: 18px;
+      height: 18px;
+      top: 4px;
+      right: 4px;
+      font-size: 10px;
+    }
+
+    .photo-list-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-sand);
+      border-radius: 16px;
+      cursor: pointer;
+    }
+
+    .photo-list-thumb {
+      width: 64px;
+      height: 64px;
+      border-radius: 12px;
+      flex-shrink: 0;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* ============ CATEGORIES TAB (NO SHORTCUTS GRID, CLEAN LIST) ============ */
+    .cat-list-section {
+      padding: 4px 18px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .cat-row-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-sand);
+      border-radius: 18px;
+      padding: 13px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      cursor: pointer;
+      position: relative;
+      box-shadow: 0 2px 10px rgba(23, 43, 42, 0.03);
+      transition: transform 0.16s ease;
+    }
+
+    .cat-row-card:hover {
+      transform: translateY(-1px);
+    }
+
+    .cat-row-squircle {
+      width: 46px;
+      height: 46px;
+      border-radius: 15px;
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+    }
+
+    .cat-menu-dropdown {
+      position: absolute;
+      right: 14px;
+      top: 54px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-sand);
+      border-radius: 14px;
+      box-shadow: 0 12px 28px rgba(23, 43, 42, 0.16);
+      z-index: 30;
+      width: 196px;
+      padding: 5px;
+      display: none;
+    }
+
+    .cat-menu-dropdown.open {
+      display: block;
+    }
+
+    .cat-menu-item {
+      width: 100%;
+      border: none;
+      background: transparent;
+      padding: 8px 10px;
+      border-radius: 10px;
+      text-align: left;
+      font-family: var(--font-sans);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--ink-primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+    }
+
+    .cat-menu-item:hover {
+      background: var(--bg-sand-soft);
+    }
+
+    .cat-menu-item.danger {
+      color: var(--terracotta);
+    }
+
+    /* ============ GRADIENT COLOR PICKER & ICON PICKER (CREATE/RENAME CATEGORY) ============ */
+    .gradient-picker-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .gradient-track-box {
+      position: relative;
+      height: 30px;
+      border-radius: 99px;
+      background: linear-gradient(90deg,
+        #1E4240 0%,
+        #5A7364 18%,
+        #7E8D78 35%,
+        #B89054 54%,
+        #C2593F 72%,
+        #7A5C7E 88%,
+        #3A5A6B 100%);
+      border: 2px solid var(--bg-surface);
+      box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.15), 0 0 0 1px var(--border-sand);
+      cursor: pointer;
+    }
+
+    .gradient-range-input {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    .gradient-range-input::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #FFFDFA;
+      border: 3px solid var(--ink-primary);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+      cursor: grab;
+    }
+
+    .gradient-range-input::-moz-range-thumb {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #FFFDFA;
+      border: 3px solid var(--ink-primary);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+      cursor: grab;
+    }
+
+    .icon-picker-row {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      scrollbar-width: none;
+    }
+
+    .icon-picker-row::-webkit-scrollbar {
+      display: none;
+    }
+
+    .icon-choice-btn {
+      width: 42px;
+      height: 42px;
+      flex-shrink: 0;
+      border-radius: 13px;
+      border: 1px solid var(--border-sand);
+      background: var(--bg-sand-soft);
+      color: var(--ink-secondary);
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    /* ============ HOUSEKEEPING TAB ============ */
+    .hk-section {
+      padding: 0 18px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .collapsible-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-sand);
+      border-radius: 18px;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+    }
+
+    .badge-soft {
+      background: var(--bg-sand);
+      color: var(--ink-primary);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 9px;
+      border-radius: 10px;
+      white-space: nowrap;
+    }
+
+    .monitor-card {
+      background: var(--sage-light);
+      border: 1px solid rgba(126, 141, 120, 0.35);
+      border-radius: 16px;
+      padding: 11px 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .event-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-sand);
+      border-radius: 16px;
+      padding: 11px;
+      display: flex;
+      align-items: center;
+      gap: 11px;
+    }
+
+    .intent-tag {
+      display: inline-block;
+      font-size: 9.5px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      padding: 2px 7px;
+      border-radius: 6px;
+      background: var(--plum-light);
+      color: var(--plum);
+      margin-bottom: 3px;
+    }
+
+    .intent-tag.shopping {
+      background: var(--ochre-light);
+      color: #8C6429;
+    }
+
+    .expand-outline-btn {
+      width: 100%;
+      border: 1px solid var(--border-sand);
+      background: var(--bg-surface);
+      color: var(--teal);
+      font-family: var(--font-sans);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 9px;
+      border-radius: 12px;
+      cursor: pointer;
+    }
+
+    /* ============ SETTINGS TAB ============ */
+    .settings-stack {
+      padding: 4px 18px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .settings-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-sand);
+      border-radius: 20px;
+      padding: 16px;
+      box-shadow: 0 3px 12px rgba(23, 43, 42, 0.03);
+    }
+
+    .settings-card.pro-bg {
+      background: linear-gradient(145deg, #FFFDFA 0%, #EEF4F2 100%);
+      border-color: rgba(30, 66, 64, 0.22);
+    }
+
+    .settings-card.warning-bg {
+      background: #FDF5EA;
+      border: 1.5px solid rgba(184, 144, 84, 0.6);
+    }
+
+    .quota-bar-track {
+      height: 8px;
+      background: var(--bg-sand);
+      border-radius: 99px;
+      overflow: hidden;
+      margin-top: 7px;
+    }
+
+    .quota-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--teal), var(--ochre));
+      border-radius: 99px;
+      transition: width 0.35s ease;
+    }
+
+    .switch {
+      position: relative;
+      width: 46px;
+      height: 26px;
+      flex-shrink: 0;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      inset: 0;
+      background: var(--bg-sand);
+      border: 1px solid var(--border-sand);
+      border-radius: 99px;
+      transition: 0.22s;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 20px;
+      width: 20px;
+      left: 2px;
+      top: 2px;
+      background: var(--bg-surface);
+      border-radius: 50%;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+      transition: 0.22s;
+    }
+    .switch input:checked + .slider {
+      background: var(--teal);
+      border-color: var(--teal);
+    }
+    .switch input:checked + .slider:before {
+      transform: translateX(20px);
+    }
+
+    /* ============ LIQUID WAVE NOTCH + JUMPING ORB BOTTOM BAR (VIDEO EFFECT) ============ */
+    .liquid-nav-shell {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 98px;
+      pointer-events: none;
+      z-index: 22;
+    }
+
+    .liquid-nav-svg {
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      width: 100%;
+      height: 98px;
+      filter: drop-shadow(0 -6px 18px rgba(23, 43, 42, 0.10));
+      pointer-events: none;
+    }
+
+    .liquid-orb {
+      position: absolute;
+      width: 46px;
+      height: 46px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 32% 28%, var(--orb-top), var(--orb-bottom));
+      box-shadow:
+        0 8px 18px var(--orb-shadow),
+        inset 0 1.5px 3px rgba(255, 255, 255, 0.35);
+      display: grid;
+      place-items: center;
+      color: #FFFDFA;
+      pointer-events: none;
+      transform: translate(-50%, -50%);
+      will-change: left, top, transform;
+      z-index: 24;
+    }
+
+    .liquid-orb-icon {
+      display: grid;
+      place-items: center;
+    }
+
+    .liquid-nav-items {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 10px;
+      height: 58px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      pointer-events: auto;
+      z-index: 23;
+    }
+
+    .liquid-nav-btn {
+      border: none;
+      background: transparent;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      cursor: pointer;
+      color: var(--ink-primary);
+      padding: 0;
+      position: relative;
+      outline: none;
+    }
+
+    .liquid-nav-btn .rest-icon {
+      transition: opacity 0.16s ease, transform 0.16s ease;
+      display: grid;
+      place-items: center;
+    }
+
+    .liquid-nav-btn .nav-label {
+      font-family: var(--font-sans);
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--ink-secondary);
+      opacity: 0;
+      transform: translateY(4px);
+      transition: opacity 0.2s ease, transform 0.2s ease, color 0.2s ease;
+      pointer-events: none;
+      position: absolute;
+      bottom: 2px;
+    }
+
+    .show-labels .liquid-nav-btn .rest-icon {
+      transform: translateY(-6px);
+    }
+
+    .show-labels .liquid-nav-btn .nav-label {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .show-labels .liquid-nav-btn.active .nav-label {
+      color: var(--teal);
+      font-weight: 700;
+    }
+
+    .home-indicator {
+      position: absolute;
+      bottom: 6px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 122px;
+      height: 4px;
+      border-radius: 99px;
+      background: rgba(23, 43, 42, 0.22);
+      z-index: 26;
+      pointer-events: none;
+    }
+
+    /* ============ OVERLAYS & MODALS INSIDE PHONE ============ */
+    .phone-modal {
+      position: absolute;
+      inset: 0;
+      z-index: 40;
+      display: none;
+      flex-direction: column;
+    }
+
+    .phone-modal.open {
+      display: flex;
+      animation: fadeSlideUp 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    @keyframes fadeSlideUp {
+      from { opacity: 0; transform: translateY(14px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .viewer-backdrop {
+      background: #101D1C;
+      color: #FFFDFA;
+    }
+
+    .sheet-backdrop {
+      background: rgba(20, 32, 31, 0.55);
+      backdrop-filter: blur(4px);
+      justify-content: flex-end;
+      padding: 14px;
+    }
+
+    .center-backdrop {
+      background: rgba(20, 32, 31, 0.52);
+      backdrop-filter: blur(4px);
+      justify-content: center;
+      align-items: center;
+      padding: 18px;
+    }
+
+    .modal-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-sand);
+      border-radius: 24px;
+      padding: 18px;
+      width: 100%;
+      max-height: 86%;
+      overflow-y: auto;
+      color: var(--ink-primary);
+      box-shadow: 0 20px 44px rgba(0, 0, 0, 0.24);
+      scrollbar-width: none;
+    }
+
+    .modal-card::-webkit-scrollbar {
+      display: none;
+    }
+
+    .action-drawer {
+      background: #152726;
+      border-top: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 24px 24px 0 0;
+      padding: 12px 16px 24px;
+      color: #FFFDFA;
+    }
+
+    .action-item-box {
+      background: rgba(255, 255, 255, 0.09);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 16px;
+      padding: 12px;
+      margin-top: 8px;
+    }
+
+    .lock-screen {
+      background: linear-gradient(175deg, #163331 0%, #1E4240 55%, #274D48 100%);
+      color: #FFFDFA;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 36px 28px;
+    }
+
+    .phone-toast {
+      position: absolute;
+      top: 56px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-10px);
+      background: var(--ink-primary);
+      color: #FFFDFA;
+      padding: 8px 14px;
+      border-radius: 99px;
+      font-size: 11.5px;
+      font-weight: 600;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.22s ease;
+      z-index: 60;
+      white-space: nowrap;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+    }
+
+    .phone-toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* ============ REVIEW & TWEAK SIDEBAR ============ */
+    .review-panel {
+      flex: 1;
+      min-width: 320px;
+      max-width: 540px;
+      background: rgba(255, 253, 250, 0.92);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border-sand);
+      border-radius: 28px;
+      padding: 24px;
+      box-shadow: 0 20px 50px rgba(23, 43, 42, 0.08);
+    }
+
+    .review-panel h1 {
+      font-family: var(--font-serif);
+      font-size: 26px;
+      font-weight: 600;
+      margin: 0 0 6px;
+      color: var(--teal);
+    }
+
+    .review-panel p.lead {
+      margin: 0 0 18px;
+      font-size: 13.5px;
+      line-height: 1.5;
+      color: var(--ink-secondary);
+    }
+
+    .control-group {
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-sand);
+      border-radius: 18px;
+      padding: 14px 16px;
+      margin-bottom: 14px;
+    }
+
+    .control-group h3 {
+      margin: 0 0 10px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--ochre);
+    }
+
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .tweak-chip {
+      border: 1px solid var(--border-sand);
+      background: var(--bg-surface);
+      color: var(--ink-primary);
+      font-family: var(--font-sans);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 7px 12px;
+      border-radius: 12px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+    }
+
+    .tweak-chip.active {
+      background: var(--teal);
+      border-color: var(--teal);
+      color: #FFFDFA;
+    }
+
+    .swatch-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      border: 1px solid rgba(0, 0, 0, 0.15);
+    }
+
+    /* App Icon Showcase Card */
+    .app-icon-showcase {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .launcher-icon-tile {
+      width: 78px;
+      height: 78px;
+      border-radius: 20px;
+      overflow: hidden;
+      border: 1px solid var(--border-sand);
+      box-shadow: 0 10px 22px rgba(23, 43, 42, 0.14);
+      flex-shrink: 0;
+      background: linear-gradient(180deg, #FBF8F1 0%, #EFE9DC 100%);
+      position: relative;
+    }
+
+    .launcher-icon-circle {
+      width: 78px;
+      height: 78px;
+      border-radius: 50%;
+      overflow: hidden;
+      border: 1px solid var(--border-sand);
+      box-shadow: 0 10px 22px rgba(23, 43, 42, 0.12);
+      flex-shrink: 0;
+      background: linear-gradient(180deg, #FBF8F1 0%, #EFE9DC 100%);
+      position: relative;
+    }
+
+    .checklist {
+      margin: 0;
+      padding-left: 18px;
+      font-size: 12.5px;
+      line-height: 1.6;
+      color: var(--ink-secondary);
+    }
+
+    .checklist strong {
+      color: var(--ink-primary);
+    }
+
+    @media (max-width: 880px) {
+      .phone-stage {
+        position: static;
+      }
+      .phone-bezel {
+        transform: scale(0.95);
+        transform-origin: top center;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div class="studio-layout">
+  <!-- ================= LEFT: INTERACTIVE PHONE PROTOTYPE ================= -->
+  <div class="phone-stage">
+    <div class="phone-bezel">
+      <div class="phone-screen" id="phoneScreen">
+        <div class="status-bar">
+          <span>9:41</span>
+          <div class="dynamic-island"></div>
+          <div class="status-icons">
+            <svg width="15" height="11" viewBox="0 0 15 11" fill="currentColor">
+              <rect x="0" y="7" width="2.5" height="4" rx="0.8"/>
+              <rect x="4" y="5" width="2.5" height="6" rx="0.8"/>
+              <rect x="8" y="2.5" width="2.5" height="8.5" rx="0.8"/>
+              <rect x="12" y="0" width="2.5" height="11" rx="0.8"/>
+            </svg>
+            <svg width="14" height="11" viewBox="0 0 24 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+              <path d="M2 7c5.5-5 14.5-5 20 0"/><path d="M5.5 11.5c3.5-3.2 9.5-3.2 13 0"/><circle cx="12" cy="16.5" r="1.4" fill="currentColor"/>
+            </svg>
+            <svg width="21" height="11" viewBox="0 0 22 11" fill="none">
+              <rect x="0.7" y="0.7" width="18" height="9.6" rx="2.6" stroke="currentColor" stroke-width="1.3"/>
+              <rect x="2.2" y="2.2" width="14" height="6.6" rx="1.4" fill="currentColor"/>
+              <path d="M20 3.7v3.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+        </div>
+
+        <div class="phone-toast" id="phoneToast"></div>
+
+        <div class="app-viewport">
+          <!-- TAB 0: PHOTOS -->
+          <section class="tab-page active" id="page-0">
+            <div class="screen-header">
+              <div class="header-title-wrap">
+                <div class="header-kicker">MemoCap</div>
+                <h2 class="header-title" id="galleryHeadingTitle">Tất cả ảnh.</h2>
+                <p class="header-subtitle" id="gallerySubtitle">6 ảnh</p>
+                <div class="header-dash"></div>
+              </div>
+              <div class="header-actions">
+                <button class="icon-pill-btn" id="btnFavFilter" title="Lọc ảnh yêu thích" onclick="toggleFavoriteFilter()">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+                  </svg>
+                </button>
+                <button class="icon-pill-btn primary" id="btnAddPhoto" title="Thêm ảnh" onclick="openAddPhotoDemo()">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="search-box-wrap">
+              <div class="search-input-shell">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#939289" stroke-width="1.8" stroke-linecap="round">
+                  <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <input type="text" id="searchInput" placeholder="Tìm ảnh & văn bản OCR..." oninput="handleSearchInput(this.value)" />
+                <button class="clear-search-btn" id="btnClearSearch" style="display:none;" onclick="clearSearchInput()">✕</button>
+              </div>
+            </div>
+
+            <div class="semantic-status-row" id="semanticStatusRow"></div>
+            <div class="filter-scroll" id="actionCardPills"></div>
+            <div id="galleryBanners"></div>
+
+            <div class="gallery-toolbar">
+              <div class="gallery-toolbar-title">
+                <span>Ảnh</span>
+                <span class="count-chip" id="toolbarCountChip">6</span>
+              </div>
+              <div class="display-switcher">
+                <button class="mode-btn active" data-mode="BIG_PREVIEW" title="Xem lớn (2 ảnh/hàng)" onclick="setDisplayMode('BIG_PREVIEW')">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+                </button>
+                <button class="mode-btn" data-mode="SMALL_PREVIEW" title="Xem nhỏ (4 ảnh/hàng)" onclick="setDisplayMode('SMALL_PREVIEW')">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="5" cy="5" r="1.5"/><circle cx="12" cy="5" r="1.5"/><circle cx="19" cy="5" r="1.5"/><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/><circle cx="5" cy="19" r="1.5"/><circle cx="12" cy="19" r="1.5"/><circle cx="19" cy="19" r="1.5"/></svg>
+                </button>
+                <button class="mode-btn" data-mode="LIST" title="Dạng danh sách" onclick="setDisplayMode('LIST')">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="photo-grid BIG_PREVIEW" id="photoGrid"></div>
+          </section>
+
+          <!-- TAB 1: CATEGORIES (NO QUICK SHORTCUTS) -->
+          <section class="tab-page" id="page-1">
+            <div class="screen-header">
+              <div class="header-title-wrap">
+                <div class="header-kicker">Phân loại thông minh</div>
+                <h2 class="header-title">Danh mục.</h2>
+                <p class="header-subtitle" id="categoriesSubtitle">5 danh mục</p>
+                <div class="header-dash"></div>
+              </div>
+              <div class="header-actions">
+                <button class="btn-editorial" id="btnCreateCat" onclick="handleCreateCategoryClick()">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  <span id="btnCreateCatLabel">Tạo danh mục (Pro)</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="cat-list-section">
+              <div id="catListContainer" style="display:flex; flex-direction:column; gap:10px;"></div>
+            </div>
+          </section>
+
+          <!-- TAB 2: HOUSEKEEPING / CLEANER -->
+          <section class="tab-page" id="page-2">
+            <div class="screen-header">
+              <div class="header-title-wrap">
+                <div class="header-kicker">Trợ lý dọn dẹp</div>
+                <h2 class="header-title">Sắp xếp.</h2>
+                <p class="header-subtitle">Sự kiện lịch phát hiện được & Dọn ảnh chụp màn hình cũ</p>
+                <div class="header-dash"></div>
+              </div>
+            </div>
+
+            <div class="hk-section" id="hkContainer"></div>
+          </section>
+
+          <!-- TAB 3: SETTINGS -->
+          <section class="tab-page" id="page-3">
+            <div class="screen-header">
+              <div class="header-title-wrap">
+                <div class="header-kicker">MemoCap</div>
+                <h2 class="header-title">Cài đặt.</h2>
+                <p class="header-subtitle">Quản lý gói tài khoản, Két bảo mật & Tiện ích màn hình chính</p>
+                <div class="header-dash"></div>
+              </div>
+            </div>
+
+            <div class="settings-stack" id="settingsContainer"></div>
+          </section>
+        </div>
+
+        <!-- ============ VIDEO-STYLE LIQUID WAVE + JUMPING ORB BOTTOM BAR ============ -->
+        <div class="liquid-nav-shell" id="liquidNavShell">
+          <svg class="liquid-nav-svg" id="liquidNavSvg" viewBox="0 0 368 98" preserveAspectRatio="none">
+            <path id="liquidWavePath" fill="#FFFDFA" d="" />
+          </svg>
+
+          <div class="liquid-orb" id="liquidOrb">
+            <div class="liquid-orb-icon" id="liquidOrbIcon"></div>
+          </div>
+
+          <div class="liquid-nav-items" id="liquidNavItems">
+            <button class="liquid-nav-btn active" data-tab="0" onclick="switchTab(0)">
+              <span class="rest-icon" data-icon-slot="0"></span>
+              <span class="nav-label">Ảnh</span>
+            </button>
+            <button class="liquid-nav-btn" data-tab="1" onclick="switchTab(1)">
+              <span class="rest-icon" data-icon-slot="1"></span>
+              <span class="nav-label">Danh mục</span>
+            </button>
+            <button class="liquid-nav-btn" data-tab="2" onclick="switchTab(2)">
+              <span class="rest-icon" data-icon-slot="2"></span>
+              <span class="nav-label">Sắp xếp</span>
+            </button>
+            <button class="liquid-nav-btn" data-tab="3" onclick="switchTab(3)">
+              <span class="rest-icon" data-icon-slot="3"></span>
+              <span class="nav-label">Cài đặt</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="home-indicator"></div>
+
+        <!-- ============ MODALS & DIALOGS ============ -->
+        <!-- 1. Full Screen Photo Viewer (100% Parity with ImageViewerDialog) -->
+        <div class="phone-modal viewer-backdrop" id="viewerModal">
+          <div style="padding: 50px 18px 14px; display:flex; justify-content:space-between; align-items:center;">
+            <button class="icon-pill-btn" style="background:rgba(255,255,255,0.12); border-color:rgba(255,255,255,0.16); color:#fff;" onclick="closeViewer()">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+            </button>
+            <div style="font-size:12.5px; color:#D5D7CC;" id="viewerCounter">1 / 6 • 24/11/2026</div>
+            <div style="display:flex; gap:8px;">
+              <button class="icon-pill-btn" id="viewerFavBtn" style="background:rgba(255,255,255,0.12); border-color:rgba(255,255,255,0.16); color:#fff;" onclick="toggleViewerFav()">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+              </button>
+              <button class="btn-editorial" style="background:var(--teal); border:1px solid rgba(255,255,255,0.22);" onclick="openPhotoSettingsFromViewer()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.79 1 1.51 1H21a2 2 0 0 1 0 4h-.09c-.72 0-1.25.4-1.51 1z"/></svg>
+                Cài đặt
+              </button>
+            </div>
+          </div>
+
+          <div style="flex:1; padding: 8px 22px; display:flex; align-items:center; justify-content:center; position:relative;" id="viewerCanvas"></div>
+          <div style="padding: 12px 18px 26px; background:rgba(12, 22, 21, 0.72);" id="viewerBottomBar"></div>
+        </div>
+
+        <!-- 2. Action Cards Expandable Drawer (inside Viewer) -->
+        <div class="phone-modal sheet-backdrop" id="actionDrawerModal" style="padding:0;" onclick="if(event.target===this) closeActionDrawer()">
+          <div class="action-drawer">
+            <div style="width:38px; height:4px; border-radius:99px; background:rgba(255,255,255,0.28); margin:0 auto 12px;"></div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+              <div style="font-size:14px; font-weight:700; display:flex; align-items:center; gap:7px;">
+                <span style="color:var(--ochre);">✦</span>
+                <span id="drawerTitle">Thông tin & Hành động 1 chạm</span>
+              </div>
+              <button onclick="closeActionDrawer()" style="border:none; background:rgba(255,255,255,0.12); color:#fff; width:28px; height:28px; border-radius:50%; cursor:pointer;">✕</button>
+            </div>
+            <div id="actionDrawerItems" style="max-height:360px; overflow-y:auto;"></div>
+          </div>
+        </div>
+
+        <!-- 3. Center Dialog Modal -->
+        <div class="phone-modal center-backdrop" id="centerDialogModal" onclick="if(event.target===this) closeCenterDialog()">
+          <div class="modal-card" id="centerDialogBody"></div>
+        </div>
+
+        <!-- 4. App Lock Screen Preview -->
+        <div class="phone-modal lock-screen" id="appLockModal">
+          <div style="display:flex; flex-direction:column; align-items:center;">
+            <div style="width:92px; height:92px; border-radius:28px; background:rgba(255,253,250,0.10); border:1px solid rgba(255,253,250,0.18); display:grid; place-items:center; margin-bottom:24px;">
+              <div style="width:68px; height:68px; border-radius:22px; background:var(--ochre); display:grid; place-items:center; box-shadow:0 10px 26px rgba(184,144,84,0.35);">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#FFFDFA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="3"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+              </div>
+            </div>
+            <h2 style="font-family:var(--font-serif); font-size:28px; font-weight:600; margin:0 0 8px;">Két ảnh bảo mật.</h2>
+            <p style="font-size:13.5px; color:rgba(255,253,250,0.75); line-height:1.5; max-width:270px; margin:0 0 28px;">
+              Ứng dụng MemoCap đang được khóa để bảo vệ các ảnh chụp màn hình riêng tư của bạn.
+            </p>
+            <button class="btn-editorial ochre" style="padding:13px 22px; font-size:14px; border-radius:16px;" onclick="closeLockPreview()">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 0 0 8 11a4 4 0 1 1 8 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0 0 15.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 0 0 8 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4"/></svg>
+              Mở khóa bằng khóa máy
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="font-size:12px; color:var(--ink-secondary); font-weight:600;">
+      Bấm các tab ở thanh dưới để xem hiệu ứng sóng lõm & bi nhảy
+    </div>
+  </div>
+
+  <!-- ================= RIGHT: REVIEW PANEL + MEMOCAP APP ICON SHOWCASE ================= -->
+  <aside class="review-panel">
+    <h1>MemoCap — Review Thiết kế UI</h1>
+    <p class="lead">
+      Bản dựng cập nhật theo yêu cầu của bạn: loại bỏ Lối tắt nhanh, loại bỏ chữ/OCR trên thumbnail lưới ảnh, thêm chọn icon + thanh màu gradient khi tạo/sửa danh mục, bảo toàn 100% cài đặt xem ảnh, và chuyển họa tiết phong cảnh thành App Icon của <strong>MemoCap</strong>.
+    </p>
+
+    <!-- App Icon Preview (From Image 3) -->
+    <div class="control-group">
+      <h3>Biểu tượng Ứng dụng (App Icon) — MemoCap</h3>
+      <div class="app-icon-showcase">
+        <div style="display:flex; flex-direction:column; align-items:center; gap:5px;">
+          <div class="launcher-icon-tile">
+            <svg viewBox="0 0 100 100" width="78" height="78" style="display:block;">
+              <defs>
+                <linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#FAF6EC"/>
+                  <stop offset="100%" stop-color="#EFE8DA"/>
+                </linearGradient>
+              </defs>
+              <rect width="100" height="100" fill="url(#skyGrad)"/>
+              <circle cx="72" cy="30" r="12" fill="#E3C391"/>
+              <path d="M0 58 Q25 44 52 57 T100 50 L100 100 L0 100 Z" fill="#D2D5CA"/>
+              <path d="M0 70 Q30 50 62 67 T100 59 L100 100 L0 100 Z" fill="#A6B29E"/>
+              <path d="M0 81 Q38 66 72 79 T100 70 L100 100 L0 100 Z" fill="#778772"/>
+              <path d="M0 91 Q50 86 100 91 L100 100 L0 100 Z" fill="#8C9A84" opacity="0.65"/>
+              <!-- Botanical leaves left -->
+              <g fill="#B89054">
+                <ellipse cx="14" cy="70" rx="5.5" ry="2.4" transform="rotate(-38 14 70)"/>
+                <ellipse cx="24" cy="76" rx="5.5" ry="2.4" transform="rotate(-22 24 76)"/>
+                <ellipse cx="10" cy="81" rx="5" ry="2.2" transform="rotate(-48 10 81)"/>
+              </g>
+              <g fill="#1E4240">
+                <ellipse cx="18" cy="86" rx="6" ry="2.5" transform="rotate(18 18 86)"/>
+                <ellipse cx="8" cy="91" rx="6" ry="2.5" transform="rotate(-15 8 91)"/>
+                <ellipse cx="28" cy="90" rx="5.5" ry="2.3" transform="rotate(10 28 90)"/>
+              </g>
+            </svg>
+          </div>
+          <span style="font-size:11px; font-weight:700; color:var(--ink-primary);">MemoCap</span>
+        </div>
+
+        <div style="display:flex; flex-direction:column; align-items:center; gap:5px;">
+          <div class="launcher-icon-circle">
+            <svg viewBox="0 0 100 100" width="78" height="78" style="display:block;">
+              <rect width="100" height="100" fill="url(#skyGrad)"/>
+              <circle cx="72" cy="30" r="12" fill="#E3C391"/>
+              <path d="M0 58 Q25 44 52 57 T100 50 L100 100 L0 100 Z" fill="#D2D5CA"/>
+              <path d="M0 70 Q30 50 62 67 T100 59 L100 100 L0 100 Z" fill="#A6B29E"/>
+              <path d="M0 81 Q38 66 72 79 T100 70 L100 100 L0 100 Z" fill="#778772"/>
+              <g fill="#B89054">
+                <ellipse cx="14" cy="70" rx="5.5" ry="2.4" transform="rotate(-38 14 70)"/>
+                <ellipse cx="24" cy="76" rx="5.5" ry="2.4" transform="rotate(-22 24 76)"/>
+              </g>
+              <g fill="#1E4240">
+                <ellipse cx="18" cy="86" rx="6" ry="2.5" transform="rotate(18 18 86)"/>
+                <ellipse cx="28" cy="90" rx="5.5" ry="2.3" transform="rotate(10 28 90)"/>
+              </g>
+            </svg>
+          </div>
+          <span style="font-size:10.5px; color:var(--ink-secondary);">Adaptive Round</span>
+        </div>
+
+        <div style="font-size:12px; color:var(--ink-secondary); line-height:1.5;">
+          Họa tiết núi sương, mặt trời ochre & tán lá được chuyển thành <strong>Adaptive App Icon</strong> cho ứng dụng <strong>MemoCap</strong> (hỗ trợ cả bo vuông Squircle và hình tròn Android).
+        </div>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <h3>1. Tùy chỉnh Thanh chuyển trang (Video Effect)</h3>
+      <div style="font-size:12px; color:var(--ink-secondary); margin-bottom:8px;">Màu quả cầu nổi (Orb Accent):</div>
+      <div class="chip-row" style="margin-bottom:12px;">
+        <button class="tweak-chip active" data-orb="teal" onclick="setOrbTheme('teal', this)">
+          <span class="swatch-dot" style="background:#1E4240;"></span> Forest Teal (Khuyên dùng)
+        </button>
+        <button class="tweak-chip" data-orb="ochre" onclick="setOrbTheme('ochre', this)">
+          <span class="swatch-dot" style="background:#B89054;"></span> Warm Ochre
+        </button>
+        <button class="tweak-chip" data-orb="sage" onclick="setOrbTheme('sage', this)">
+          <span class="swatch-dot" style="background:#7E8D78;"></span> Sage Olive
+        </button>
+      </div>
+
+      <div style="font-size:12px; color:var(--ink-secondary); margin-bottom:8px;">Hiển thị tên tab dưới icon:</div>
+      <div class="chip-row" style="margin-bottom:12px;">
+        <button class="tweak-chip active" data-label="off" onclick="setNavLabels(false, this)">Chỉ icon (chuẩn Video)</button>
+        <button class="tweak-chip" data-label="on" onclick="setNavLabels(true, this)">Hiện nhãn nhỏ (chuẩn Ảnh 1)</button>
+      </div>
+
+      <div style="font-size:12px; color:var(--ink-secondary); margin-bottom:8px;">Tốc độ hiệu ứng nhảy sóng:</div>
+      <div class="chip-row">
+        <button class="tweak-chip" onclick="setAnimDuration(620, this)">Chậm mượt (0.62s)</button>
+        <button class="tweak-chip active" onclick="setAnimDuration(440, this)">Tiêu chuẩn (0.44s)</button>
+        <button class="tweak-chip" onclick="setAnimDuration(290, this)">Nhanh gọn (0.29s)</button>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <h3>2. Kiểm thử Các Trạng thái Hệ thống</h3>
+      <div class="chip-row" style="margin-bottom:10px;">
+        <button class="tweak-chip active" id="simFreeBtn" onclick="setTierState(false, false)">Gói Free (32/50)</button>
+        <button class="tweak-chip" id="simExhaustedBtn" onclick="setTierState(false, true)">Free Hết hạn mức (50/50)</button>
+        <button class="tweak-chip" id="simProBtn" onclick="setTierState(true, false)">Gói Pro</button>
+      </div>
+      <div class="chip-row">
+        <button class="tweak-chip" id="simPermBtn" onclick="togglePermDemo()">Xin quyền bộ nhớ: Tắt</button>
+        <button class="tweak-chip" id="simScanBtn" onclick="toggleScanDemo()">Đang quét AI: Tắt</button>
+        <button class="tweak-chip" onclick="openLockPreview()">Xem AppLockScreen</button>
+      </div>
+    </div>
+
+    <div class="control-group" style="margin-bottom:0;">
+      <h3>3. Điểm đã cập nhật & Bảo toàn Chuẩn Hệ thống</h3>
+      <ul class="checklist">
+        <li><strong>Lưới ảnh sạch sẽ:</strong> Đã bỏ tên ảnh & đoạn OCR khỏi các ô thumbnail (chỉ còn ngày chụp, icon lịch, badge Két/Yêu thích/Danh mục giống hệt app gốc).</li>
+        <li><strong>Tab Danh mục gọn gàng:</strong> Đã xóa phần Lối tắt nhanh thừa; giữ danh sách danh mục chính với icon Squircle & menu ⋮.</li>
+        <li><strong>Tạo/Sửa Danh mục mới:</strong> Có <strong>thanh chọn màu Gradient</strong> theo bảng màu theme + bộ <strong>8 icon chuẩn</strong> hiện tại.</li>
+        <li><strong>Viewer & Cài đặt ảnh đầy đủ:</strong> Nút <strong>Cài đặt</strong> mở hộp thoại có đủ Tiêu đề, Thư mục lưu trữ, Gán danh mục, Tập tin/Ngày tạo, Quét lại ảnh, Yêu thích, Xóa, Chuyển/Khôi phục Két bảo mật và Lưu thay đổi.</li>
+      </ul>
+    </div>
+  </aside>
+</div>
+
+<script>
+  // ===================== APP STATE (MIRRORING KOTLIN VIEWMODELS) =====================
+  const appState = {
+    activeTab: 0,
+    isPro: false,
+    isQuotaExhausted: false,
+    hasStoragePermission: true,
+    isScanning: false,
+    displayMode: 'BIG_PREVIEW', // BIG_PREVIEW | SMALL_PREVIEW | LIST
+    onlyFavorites: false,
+    searchQuery: '',
+    activeActionCardType: 'ALL',
+    activeCategoryId: null,
+    isEventsExpanded: false,
+    isClutterExpanded: false,
+    isVaultEnabled: true,
+    showLabels: false,
+    orbTheme: 'teal',
+    animDuration: 440,
+    viewingPhotoId: null,
+    openCategoryMenuId: null,
+    retentionRules: {
+      cat_events: 14,
+      cat_tobuy: 7,
+      cat_reading: 90,
+      cat_nature: 60,
+      cat_personal: 30
+    }
+  };
+
+  const folders = [
+    { id: 'f_cam', name: 'Cuộn camera' },
+    { id: 'f_screen', name: 'Screenshots' },
+    { id: 'f_work', name: 'Tài liệu công việc' }
+  ];
+
+  // Exact 8 Icons from IconsHelper.CATEGORY_ICONS
+  const CATEGORY_ICONS = [
+    { id: 'tag', label: 'Tag' },
+    { id: 'leaf', label: 'Nature' },
+    { id: 'user', label: 'Portraits' },
+    { id: 'utensils', label: 'Food' },
+    { id: 'building', label: 'Architecture' },
+    { id: 'paw', label: 'Animals' },
+    { id: 'plane', label: 'Travel' },
+    { id: 'camera', label: 'Camera' }
+  ];
+
+  // Theme-aligned gradient stops
+  const THEME_GRADIENT_STOPS = [
+    { pos: 0, hex: '#1E4240' },
+    { pos: 18, hex: '#5A7364' },
+    { pos: 35, hex: '#7E8D78' },
+    { pos: 54, hex: '#B89054' },
+    { pos: 72, hex: '#C2593F' },
+    { pos: 88, hex: '#7A5C7E' },
+    { pos: 100, hex: '#3A5A6B' }
+  ];
+
+  let categories = [
+    { id: 'cat_events', name: 'Lịch & Sự kiện', colorHex: '#1E4240', iconName: 'tag' },
+    { id: 'cat_tobuy', name: 'Cần mua & Chi tiêu', colorHex: '#B89054', iconName: 'utensils' },
+    { id: 'cat_reading', name: 'Đọc & Tham khảo', colorHex: '#7E8D78', iconName: 'building' },
+    { id: 'cat_nature', name: 'Thiên nhiên & Phong cảnh', colorHex: '#5A7364', iconName: 'leaf' },
+    { id: 'cat_personal', name: 'Cá nhân & Giấy tờ', colorHex: '#7A5C7E', iconName: 'user' }
+  ];
+
+  let photos = [
+    {
+      id: 'p1',
+      title: 'Hóa đơn chuyển khoản Vietcombank',
+      fileName: 'Screenshot_20261125_VCB.png',
+      description: 'Chuyển khoản đơn nội thất',
+      folderId: 'f_screen',
+      date: '25/11/2026',
+      size: '1.2 MB',
+      categoryIds: ['cat_tobuy'],
+      isFavorite: true,
+      isEncrypted: true,
+      isProcessed: true,
+      detectedIntent: 'SHOPPING',
+      suggestedEventTitle: 'Thanh toán đơn nội thất mây tre',
+      suggestedEventTime: 'Ngày mai · 09:30',
+      hasReminderCreated: false,
+      actionType: 'PAYMENT',
+      semanticScore: 0.91,
+      ocrText: 'VCB 1029485712 NGUYEN MINH ANH 1450000',
+      bgGradient: 'linear-gradient(155deg, #E8EFE9 0%, #CFDCD1 100%)',
+      visualAccent: '#1E4240',
+      actionCards: [
+        { type: 'PAYMENT', title: 'Vietcombank • 1029485712', subtitle: 'NGUYEN MINH ANH · 1.450.000đ', buttons: ['Chép STK', 'Chép nội dung', 'Xem mã QR'] },
+        { type: 'EVENT', title: 'Nhắc thanh toán đơn hàng', subtitle: 'Gợi ý tạo nhắc mua sắm (+24h)', buttons: ['Thêm vào lịch'] }
+      ]
+    },
+    {
+      id: 'p2',
+      title: 'Quán cà phê Sân Vườn Thảo Điền',
+      fileName: 'Screenshot_20261124_Maps.png',
+      description: '',
+      folderId: 'f_screen',
+      date: '24/11/2026',
+      size: '2.4 MB',
+      categoryIds: ['cat_events', 'cat_reading'],
+      isFavorite: false,
+      isEncrypted: false,
+      isProcessed: true,
+      detectedIntent: 'EVENT',
+      suggestedEventTitle: 'Gặp gỡ khách hàng tại Thảo Điền',
+      suggestedEventTime: 'Thứ 6, 27/11 · 14:00',
+      hasReminderCreated: false,
+      actionType: 'ADDRESS',
+      semanticScore: 0.86,
+      ocrText: '42 Xuan Thuy Thao Dien Thu Duc 14:00',
+      bgGradient: 'linear-gradient(155deg, #F4EBDD 0%, #E3D1B5 100%)',
+      visualAccent: '#B89054',
+      actionCards: [
+        { type: 'ADDRESS', title: '42 Xuân Thủy, Thảo Điền, Thủ Đức', subtitle: 'Địa chỉ được trích xuất', buttons: ['Chỉ đường Maps', 'Sao chép'] },
+        { type: 'EVENT', title: 'Lịch hẹn lúc 14:00 · 27/11', subtitle: 'Tự động nhận diện thời gian', buttons: ['Thêm vào lịch'] }
+      ]
+    },
+    {
+      id: 'p3',
+      title: 'Danh thiếp Anh Khoa',
+      fileName: 'IMG_20261122_Contact.jpg',
+      description: 'KTS Studio Mộc',
+      folderId: 'f_cam',
+      date: '22/11/2026',
+      size: '840 KB',
+      categoryIds: ['cat_personal'],
+      isFavorite: true,
+      isEncrypted: true,
+      isProcessed: true,
+      detectedIntent: null,
+      suggestedEventTitle: null,
+      hasReminderCreated: false,
+      actionType: 'CONTACT',
+      semanticScore: 0.78,
+      ocrText: 'Tran Anh Khoa 0908345678 Studio Moc',
+      bgGradient: 'linear-gradient(155deg, #EBE6EE 0%, #D8CEE0 100%)',
+      visualAccent: '#7A5C7E',
+      actionCards: [
+        { type: 'CONTACT', title: 'Trần Anh Khoa · 0908 345 678', subtitle: 'KTS Studio Mộc', buttons: ['Gọi điện', 'Sao chép'] }
+      ]
+    },
+    {
+      id: 'p4',
+      title: 'Vé máy bay VN245',
+      fileName: 'Screenshot_20261120_Flight.png',
+      description: '',
+      folderId: 'f_work',
+      date: '20/11/2026',
+      size: '1.6 MB',
+      categoryIds: ['cat_events'],
+      isFavorite: false,
+      isEncrypted: true,
+      isProcessed: true,
+      detectedIntent: 'EVENT',
+      suggestedEventTitle: 'Chuyến bay VN245 · Cổng 12',
+      suggestedEventTime: 'CN, 29/11 · 08:15',
+      hasReminderCreated: true,
+      actionType: 'ALL',
+      semanticScore: 0.88,
+      ocrText: 'VN245 HAN SGN flight 29/11 08:15',
+      bgGradient: 'linear-gradient(155deg, #E2EAE9 0%, #C6D6D3 100%)',
+      visualAccent: '#1E4240',
+      actionCards: [
+        { type: 'EVENT', title: 'Chuyến bay VN245 · 08:15 29/11', subtitle: 'Nhà ga T1 · Ghế 14A', buttons: ['Thêm vào lịch'] }
+      ]
+    },
+    {
+      id: 'p5',
+      title: 'Ghi chú sách Thiết kế Tối giản',
+      fileName: 'Screenshot_20261115_Note.png',
+      description: '',
+      folderId: 'f_screen',
+      date: '15/11/2026',
+      size: '690 KB',
+      categoryIds: ['cat_reading'],
+      isFavorite: false,
+      isEncrypted: false,
+      isProcessed: true,
+      detectedIntent: 'READING',
+      suggestedEventTitle: 'Đọc chương 4: Khoảng trắng',
+      suggestedEventTime: 'Bài đọc đã lưu',
+      hasReminderCreated: false,
+      actionType: 'ALL',
+      semanticScore: 0.64,
+      ocrText: 'Thiet ke toi gian khoang trang',
+      bgGradient: 'linear-gradient(155deg, #ECEFE6 0%, #D4DEC8 100%)',
+      visualAccent: '#7E8D78',
+      actionCards: []
+    },
+    {
+      id: 'p6',
+      title: 'Đồi thông Đà Lạt',
+      fileName: 'IMG_20261002_Dalat.jpg',
+      description: 'Chụp sáng sớm',
+      folderId: 'f_cam',
+      date: '02/10/2026',
+      size: '3.1 MB',
+      categoryIds: ['cat_nature'],
+      isFavorite: true,
+      isEncrypted: false,
+      isProcessed: false,
+      detectedIntent: null,
+      suggestedEventTitle: null,
+      hasReminderCreated: false,
+      actionType: 'ADDRESS',
+      semanticScore: 0.72,
+      ocrText: 'Doi Thien Phuc Duc Da Lat cay coi thien nhien',
+      bgGradient: 'linear-gradient(155deg, #E5ECE5 0%, #C2D2C4 100%)',
+      visualAccent: '#5A7364',
+      actionCards: [
+        { type: 'ADDRESS', title: 'Đồi Thiên Phúc Đức, Đà Lạt', subtitle: 'Địa điểm thiên nhiên', buttons: ['Chỉ đường Maps', 'Sao chép'] }
+      ]
+    }
+  ];
+
+  let agingClutter = [
+    { id: 'c1', title: 'Screenshot_OTP_Bank_Oct12.png', ageDays: 45, size: '1.8 MB' },
+    { id: 'c2', title: 'Screenshot_Voucher_HetHan.png', ageDays: 39, size: '2.4 MB' },
+    { id: 'c3', title: 'Screenshot_Menu_QuanAn.png', ageDays: 34, size: '1.5 MB' }
+  ];
+
+  // ===================== COLOR & ICON HELPERS =====================
+  function hexToRgb(hex) {
+    const clean = hex.replace('#', '');
+    return {
+      r: parseInt(clean.substring(0, 2), 16),
+      g: parseInt(clean.substring(2, 4), 16),
+      b: parseInt(clean.substring(4, 6), 16)
+    };
+  }
+
+  function rgbToHex(r, g, b) {
+    return '#' + [r, g, b].map(x => Math.round(x).toString(16).padStart(2, '0')).join('').toUpperCase();
+  }
+
+  function sampleThemeGradient(percent) {
+    const p = Math.max(0, Math.min(100, Number(percent)));
+    for (let i = 0; i < THEME_GRADIENT_STOPS.length - 1; i++) {
+      const a = THEME_GRADIENT_STOPS[i];
+      const b = THEME_GRADIENT_STOPS[i + 1];
+      if (p >= a.pos && p <= b.pos) {
+        const t = (p - a.pos) / (b.pos - a.pos);
+        const ca = hexToRgb(a.hex);
+        const cb = hexToRgb(b.hex);
+        return rgbToHex(
+          ca.r + (cb.r - ca.r) * t,
+          ca.g + (cb.g - ca.g) * t,
+          ca.b + (cb.b - ca.b) * t
+        );
+      }
+    }
+    return THEME_GRADIENT_STOPS[0].hex;
+  }
+
+  function closestGradientPercent(hex) {
+    const target = hexToRgb(hex || '#1E4240');
+    let bestP = 0;
+    let bestDist = Infinity;
+    for (let p = 0; p <= 100; p += 2) {
+      const c = hexToRgb(sampleThemeGradient(p));
+      const d = (c.r - target.r) ** 2 + (c.g - target.g) ** 2 + (c.b - target.b) ** 2;
+      if (d < bestDist) {
+        bestDist = d;
+        bestP = p;
+      }
+    }
+    return bestP;
+  }
+
+  function navIconSvg(idx, size = 21, strokeWidth = 1.7) {
+    const common = `width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"`;
+    if (idx === 0) return `<svg ${common}><rect x="3" y="4" width="18" height="16" rx="3.5"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 15l-4.8-4.5a1.5 1.5 0 0 0-2.1 0L6 18"/></svg>`;
+    if (idx === 1) return `<svg ${common}><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>`;
+    if (idx === 2) return `<svg ${common}><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3z"/><circle cx="19" cy="18" r="1.5"/></svg>`;
+    return `<svg ${common}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.79 1 1.51 1H21a2 2 0 0 1 0 4h-.09c-.72 0-1.25.4-1.51 1z"/></svg>`;
+  }
+
+  function catIconSvg(iconName, size = 21) {
+    const common = `width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"`;
+    switch (iconName) {
+      case 'leaf': return `<svg ${common}><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg>`;
+      case 'user': return `<svg ${common}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;
+      case 'utensils': return `<svg ${common}><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7"/></svg>`;
+      case 'building': return `<svg ${common}><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01M16 6h.01M12 6h.01M12 10h.01M12 14h.01M16 10h.01M16 14h.01M8 10h.01M8 14h.01"/></svg>`;
+      case 'paw': return `<svg ${common}><circle cx="11" cy="4" r="2"/><circle cx="18" cy="8" r="2"/><circle cx="20" cy="16" r="2"/><path d="M9 10a5 5 0 0 1 5 5v3.5a3.5 3.5 0 0 1-6.84 1.045Q6.52 17.48 4.46 16.84A3.5 3.5 0 0 1 5.5 10Z"/></svg>`;
+      case 'plane': return `<svg ${common}><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>`;
+      case 'camera': return `<svg ${common}><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>`;
+      case 'shield': return `<svg ${common}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`;
+      case 'calendar': return `<svg ${common}><rect x="3" y="4" width="18" height="17" rx="3"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`;
+      default: return `<svg ${common}><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>`;
+    }
+  }
+
+  // ===================== LIQUID WAVE NOTCH + JUMPING ORB ENGINE =====================
+  const navW = 368;
+  const navH = 98;
+  const barTop = 30;
+  const dipDepth = 31;
+  const dipHalfWidth = 45;
+  const tabCenters = [0, 1, 2, 3].map(i => (i + 0.5) * (navW / 4));
+
+  let currentOrbX = tabCenters[0];
+  let currentNotchX = tabCenters[0];
+  let currentOrbY = 34;
+  let navAnimFrame = null;
+
+  function buildWavePath(cx, depth) {
+    const leftEdge = Math.max(0, cx - dipHalfWidth);
+    const rightEdge = Math.min(navW, cx + dipHalfWidth);
+    const cp1 = 19;
+    const cp2 = 22;
+    const dipY = barTop + depth;
+
+    return [
+      `M 0 ${barTop}`,
+      `L ${leftEdge.toFixed(2)} ${barTop}`,
+      `C ${(cx - cp2).toFixed(2)} ${barTop}, ${(cx - cp1).toFixed(2)} ${dipY.toFixed(2)}, ${cx.toFixed(2)} ${dipY.toFixed(2)}`,
+      `C ${(cx + cp1).toFixed(2)} ${dipY.toFixed(2)}, ${(cx + cp2).toFixed(2)} ${barTop}, ${rightEdge.toFixed(2)} ${barTop}`,
+      `L ${navW} ${barTop}`,
+      `L ${navW} ${navH}`,
+      `L 0 ${navH} Z`
+    ].join(' ');
+  }
+
+  function renderNavState(orbX, orbY, notchX, depth, activeIconIdx) {
+    const pathEl = document.getElementById('liquidWavePath');
+    const orbEl = document.getElementById('liquidOrb');
+    const orbIconEl = document.getElementById('liquidOrbIcon');
+
+    pathEl.setAttribute('d', buildWavePath(notchX, depth));
+    orbEl.style.left = `${(orbX / navW) * 100}%`;
+    orbEl.style.top = `${orbY}px`;
+
+    if (orbIconEl.dataset.idx !== String(activeIconIdx)) {
+      orbIconEl.dataset.idx = String(activeIconIdx);
+      orbIconEl.innerHTML = navIconSvg(activeIconIdx, 20, 1.9);
+    }
+
+    document.querySelectorAll('.liquid-nav-btn').forEach((btn, idx) => {
+      const dist = Math.abs(orbX - tabCenters[idx]);
+      const ratio = Math.min(1, Math.max(0, (dist - 10) / 30));
+      const restSlot = btn.querySelector('.rest-icon');
+      restSlot.style.opacity = ratio.toFixed(2);
+      restSlot.style.transform = appState.showLabels
+        ? `translateY(-6px) scale(${0.78 + 0.22 * ratio})`
+        : `scale(${0.78 + 0.22 * ratio})`;
+    });
+  }
+
+  function initBottomNav() {
+    document.querySelectorAll('[data-icon-slot]').forEach(el => {
+      const idx = Number(el.dataset.iconSlot);
+      el.innerHTML = navIconSvg(idx, 20, 1.65);
+    });
+    renderNavState(tabCenters[0], 34, tabCenters[0], dipDepth, 0);
+  }
+
+  function easeOutBack(t) {
+    const c1 = 1.45;
+    const c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+  }
+
+  function easeInOutCubic(t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }
+
+  function switchTab(newIdx) {
+    if (newIdx === appState.activeTab) return;
+    const oldIdx = appState.activeTab;
+    appState.activeTab = newIdx;
+
+    document.querySelectorAll('.tab-page').forEach((page, i) => {
+      page.classList.remove('active', 'exit-left');
+      if (i === newIdx) {
+        page.classList.add('active');
+      } else if (i < newIdx) {
+        page.classList.add('exit-left');
+      }
+    });
+
+    document.querySelectorAll('.liquid-nav-btn').forEach((btn, i) => {
+      btn.classList.toggle('active', i === newIdx);
+    });
+
+    if (navAnimFrame) cancelAnimationFrame(navAnimFrame);
+    const startX = currentOrbX;
+    const targetX = tabCenters[newIdx];
+    const startTime = performance.now();
+    const duration = appState.animDuration;
+    const jumpHeight = Math.abs(newIdx - oldIdx) > 1 ? 30 : 24;
+
+    function tick(now) {
+      const elapsed = now - startTime;
+      const t = Math.min(1, elapsed / duration);
+      const moveEase = easeInOutCubic(t);
+      const settleEase = easeOutBack(t);
+
+      currentOrbX = startX + (targetX - startX) * moveEase;
+      currentNotchX = startX + (targetX - startX) * Math.min(1.06, settleEase * 0.98 + t * 0.02);
+
+      const arc = Math.sin(Math.PI * t);
+      currentOrbY = 34 - jumpHeight * arc;
+
+      const dynamicDepth = dipDepth * (1 - 0.24 * Math.sin(Math.PI * t));
+      const iconToShow = t < 0.44 ? oldIdx : newIdx;
+
+      const orbEl = document.getElementById('liquidOrb');
+      const scale = 1 + 0.09 * arc;
+      orbEl.style.transform = `translate(-50%, -50%) scale(${scale.toFixed(3)})`;
+
+      renderNavState(currentOrbX, currentOrbY, currentNotchX, dynamicDepth, iconToShow);
+
+      if (t < 1) {
+        navAnimFrame = requestAnimationFrame(tick);
+      } else {
+        currentOrbX = targetX;
+        currentNotchX = targetX;
+        currentOrbY = 34;
+        orbEl.style.transform = 'translate(-50%, -50%) scale(1)';
+        renderNavState(targetX, 34, targetX, dipDepth, newIdx);
+      }
+    }
+
+    navAnimFrame = requestAnimationFrame(tick);
+  }
+
+  // ===================== RENDER GALLERY TAB =====================
+  function getFilteredPhotos() {
+    const q = appState.searchQuery.trim().toLowerCase();
+    return photos.filter(p => {
+      if (appState.onlyFavorites && !p.isFavorite) return false;
+      if (appState.activeCategoryId && !p.categoryIds.includes(appState.activeCategoryId)) return false;
+      if (appState.activeActionCardType !== 'ALL') {
+        const hasCard = p.actionCards.some(c => c.type === appState.activeActionCardType) || p.actionType === appState.activeActionCardType;
+        if (!hasCard) return false;
+      }
+      if (q) {
+        const matchText = (p.title + ' ' + p.ocrText).toLowerCase().includes(q);
+        const semanticAllowed = appState.isPro && (
+          (q.includes('cây') || q.includes('thiên nhiên')) && p.id === 'p6' ||
+          (q.includes('chuyển khoản') || q.includes('tiền')) && p.id === 'p1' ||
+          (q.includes('bay') || q.includes('flight')) && p.id === 'p4'
+        );
+        if (!matchText && !semanticAllowed) return false;
+      }
+      return true;
+    });
+  }
+
+  function renderGallery() {
+    const filtered = getFilteredPhotos();
+    const activeCat = categories.find(c => c.id === appState.activeCategoryId);
+
+    let title = 'Tất cả ảnh.';
+    if (appState.onlyFavorites) title = 'Ảnh yêu thích.';
+    else if (appState.activeActionCardType === 'ADDRESS') title = 'Địa chỉ & Địa điểm.';
+    else if (appState.activeActionCardType === 'PAYMENT') title = 'Thông tin chuyển khoản.';
+    else if (appState.activeActionCardType === 'CONTACT') title = 'Liên hệ & Danh bạ.';
+    else if (activeCat) title = activeCat.name + '.';
+
+    document.getElementById('galleryHeadingTitle').textContent = title;
+    document.getElementById('gallerySubtitle').textContent = `${filtered.length} ảnh`;
+    document.getElementById('toolbarCountChip').textContent = filtered.length;
+
+    const favBtn = document.getElementById('btnFavFilter');
+    favBtn.classList.toggle('fav-active', appState.onlyFavorites);
+    favBtn.querySelector('svg').setAttribute('fill', appState.onlyFavorites ? 'currentColor' : 'none');
+
+    document.getElementById('btnAddPhoto').style.display = appState.hasStoragePermission ? 'none' : 'grid';
+
+    const semRow = document.getElementById('semanticStatusRow');
+    if (appState.isPro) {
+      semRow.innerHTML = `
+        <div class="semantic-pill pro" onclick="showToast('Tìm kiếm ngữ nghĩa đang bật')">
+          <span>✦ Tìm kiếm ngữ nghĩa đang bật</span>
+        </div>
+        ${appState.searchQuery.trim() ? `<span style="font-size:11px; color:var(--plum); font-weight:600;">${filtered.length} kết quả ngữ nghĩa</span>` : ''}
+      `;
+    } else {
+      semRow.innerHTML = `
+        <div class="semantic-pill free" onclick="openSemanticUpgradeDialog()">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <span>Bật tìm kiếm ngữ nghĩa</span>
+          <span class="pro-tag">PRO</span>
+        </div>
+      `;
+    }
+
+    const counts = {
+      ALL: photos.length,
+      ADDRESS: photos.filter(p => p.actionCards.some(c => c.type === 'ADDRESS')).length,
+      PAYMENT: photos.filter(p => p.actionCards.some(c => c.type === 'PAYMENT')).length,
+      CONTACT: photos.filter(p => p.actionCards.some(c => c.type === 'CONTACT')).length
+    };
+    const pills = [
+      { id: 'ALL', label: 'Tất cả ảnh', count: counts.ALL },
+      { id: 'ADDRESS', label: '📍 Địa chỉ', count: counts.ADDRESS },
+      { id: 'PAYMENT', label: '💳 Chuyển khoản', count: counts.PAYMENT },
+      { id: 'CONTACT', label: '👤 Liên hệ', count: counts.CONTACT }
+    ];
+    document.getElementById('actionCardPills').innerHTML = pills.map(p => `
+      <button class="action-pill ${appState.activeActionCardType === p.id && !appState.activeCategoryId ? 'active' : ''}"
+        data-type="${p.id}" onclick="selectActionCardFilter('${p.id}')">
+        <span>${p.label}</span>
+        <span class="count-dot">${p.count}</span>
+      </button>
+    `).join('');
+
+    const hasFilter = appState.onlyFavorites || appState.activeActionCardType !== 'ALL' || appState.activeCategoryId || appState.searchQuery.trim() !== '';
+    let bannersHtml = '';
+
+    if (hasFilter) {
+      const label = appState.onlyFavorites ? 'Yêu thích' : activeCat ? activeCat.name : appState.searchQuery ? `"${appState.searchQuery}"` : appState.activeActionCardType;
+      bannersHtml += `
+        <div class="info-banner filter">
+          <div><strong>Bộ lọc:</strong> ${label}</div>
+          <button onclick="clearAllFilters()" style="border:none; background:rgba(30,66,64,0.12); color:var(--teal); font-weight:700; font-size:11px; padding:4px 9px; border-radius:99px; cursor:pointer;">Xóa lọc ✕</button>
+        </div>`;
+    }
+
+    if (!appState.isPro && appState.isQuotaExhausted) {
+      bannersHtml += `
+        <div class="info-banner quota">
+          <div style="width:30px; height:30px; border-radius:10px; background:var(--ochre); color:#fff; display:grid; place-items:center; flex-shrink:0;">✦</div>
+          <div style="flex:1;">
+            <strong style="display:block; margin-bottom:2px;">Hạn mức AI tháng này (Tự động đặt lại sau 12 ngày)</strong>
+            <span style="font-size:11px; line-height:1.4; display:block;">Bạn đã dùng hết 50 lượt AI thông minh tháng này. Nâng cấp Pro để tiếp tục tự động hóa không giới hạn!</span>
+          </div>
+        </div>`;
+    }
+
+    if (!appState.hasStoragePermission) {
+      bannersHtml += `
+        <div class="info-banner permission">
+          <div style="width:34px; height:34px; border-radius:12px; background:var(--teal-soft); color:var(--teal); display:grid; place-items:center; flex-shrink:0;">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <div style="flex:1;">
+            <strong style="display:block; margin-bottom:2px;">Tự động tải ảnh từ thiết bị</strong>
+            <span style="font-size:11px; color:var(--ink-secondary); display:block; margin-bottom:8px;">Cấp quyền để tự động tải và sắp xếp tất cả ảnh trên thiết bị của bạn.</span>
+            <button class="btn-editorial" style="padding:6px 11px; font-size:11px;" onclick="grantPermissionDemo()">Cho phép truy cập</button>
+          </div>
+        </div>`;
+    }
+
+    if (appState.isScanning) {
+      bannersHtml += `
+        <div class="info-banner scanning">
+          <div class="spinner"></div>
+          <span>Đang đồng bộ AI... (còn 2 ảnh)</span>
+        </div>`;
+    }
+
+    document.getElementById('galleryBanners').innerHTML = bannersHtml;
+
+    const gridEl = document.getElementById('photoGrid');
+    gridEl.className = `photo-grid ${appState.displayMode}`;
+
+    if (filtered.length === 0) {
+      gridEl.className = 'photo-grid LIST';
+      gridEl.innerHTML = `
+        <div style="background:var(--bg-surface); border:1px solid var(--border-sand); border-radius:20px; padding:28px 20px; text-align:center;">
+          <div style="width:52px; height:52px; border-radius:18px; background:var(--bg-sand); color:var(--teal); display:grid; place-items:center; margin:0 auto 12px;">
+            ${navIconSvg(0, 24, 1.6)}
+          </div>
+          <div style="font-family:var(--font-serif); font-size:18px; font-weight:600; color:var(--teal);">Không tìm thấy ảnh nào</div>
+          <div style="font-size:12px; color:var(--ink-secondary); margin:6px 0 14px;">Không có ảnh nào khớp với bộ lọc hoặc từ khóa tìm kiếm của bạn.</div>
+          <button class="btn-editorial" onclick="clearAllFilters()">Xóa bộ lọc</button>
+        </div>`;
+    } else if (appState.displayMode === 'LIST') {
+      gridEl.innerHTML = filtered.map(p => {
+        const photoCats = categories.filter(c => p.categoryIds.includes(c.id));
+        const isShopping = p.detectedIntent === 'SHOPPING' || p.categoryIds.includes('cat_tobuy');
+        const isEvent = p.detectedIntent === 'EVENT' || p.categoryIds.includes('cat_events') || !!p.suggestedEventTitle;
+        return `
+          <div class="photo-list-card" onclick="openViewer('${p.id}')">
+            <div class="photo-list-thumb" style="background:${p.bgGradient};">
+              ${appState.isPro && appState.searchQuery ? `<div class="photo-semantic-badge" style="top:4px;left:4px;">${(p.semanticScore*100).toFixed(0)}%</div>` : (p.isEncrypted ? `<div class="photo-vault-badge" style="width:18px;height:18px;top:4px;left:4px;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>` : '')}
+            </div>
+            <div style="flex:1; min-width:0;">
+              <div style="font-size:13px; font-weight:600; color:var(--ink-primary);">${p.date} • ${p.size}</div>
+              <div style="display:flex; flex-wrap:wrap; gap:5px; margin-top:5px;">
+                ${appState.isPro && appState.searchQuery ? `<span style="font-size:10px;font-weight:700;color:var(--plum);background:var(--plum-light);padding:2px 6px;border-radius:6px;">✦ Khớp ${(p.semanticScore*100).toFixed(0)}%</span>` : ''}
+                ${photoCats.slice(0,2).map(c => `<span style="font-size:10px;font-weight:600;color:${c.colorHex};background:var(--bg-sand-soft);padding:2px 7px;border-radius:6px;">${c.name}</span>`).join('')}
+                ${(isShopping || isEvent) ? `<span style="font-size:10px;font-weight:700;color:${isShopping ? '#8C6429' : 'var(--teal)'};background:${isShopping ? 'var(--ochre-light)' : 'var(--teal-soft)'};padding:2px 7px;border-radius:6px;">${isShopping ? 'Lên lịch mua' : 'Sự kiện'}</span>` : ''}
+              </div>
+            </div>
+            <button class="photo-fav-btn ${p.isFavorite ? 'active' : ''}" style="position:static; background:${p.isFavorite ? 'var(--terracotta-light)' : 'var(--bg-sand-soft)'}; color:${p.isFavorite ? 'var(--terracotta)' : 'var(--ink-secondary)'};" onclick="event.stopPropagation(); togglePhotoFavorite('${p.id}')">
+              ${p.isFavorite ? '♥' : '♡'}
+            </button>
+          </div>`;
+      }).join('');
+    } else {
+      gridEl.innerHTML = filtered.map(p => {
+        const photoCats = categories.filter(c => p.categoryIds.includes(c.id));
+        const isShopping = p.detectedIntent === 'SHOPPING' || p.categoryIds.includes('cat_tobuy');
+        const isEvent = p.detectedIntent === 'EVENT' || p.categoryIds.includes('cat_events') || !!p.suggestedEventTitle;
+        const hasSchedule = isShopping || isEvent;
+        return `
+          <div class="photo-card" onclick="openViewer('${p.id}')">
+            <div class="photo-thumb-wrap">
+              <div class="photo-thumb-visual" style="background:${p.bgGradient};">
+                ${appState.isPro && appState.searchQuery ? `<div class="photo-semantic-badge">✦ Khớp ${(p.semanticScore*100).toFixed(0)}%</div>` : (p.isEncrypted ? `<div class="photo-vault-badge" title="Đã mã hóa trong Két"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>` : '')}
+                <button class="photo-fav-btn ${p.isFavorite ? 'active' : ''}" onclick="event.stopPropagation(); togglePhotoFavorite('${p.id}')">
+                  ${p.isFavorite ? '♥' : '♡'}
+                </button>
+                <!-- Clean visual preview placeholder (NO title / NO OCR text on card) -->
+                <div class="visual-wireframe">
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <div style="width:18px; height:18px; border-radius:6px; background:${p.visualAccent}; opacity:0.25;"></div>
+                    <div class="wf-bar" style="width:55%;"></div>
+                  </div>
+                  <div style="display:flex; flex-direction:column; gap:5px;">
+                    <div class="wf-bar" style="width:88%;"></div>
+                    <div class="wf-bar" style="width:68%;"></div>
+                    <div class="wf-bar" style="width:45%;"></div>
+                  </div>
+                </div>
+                ${appState.displayMode === 'BIG_PREVIEW' && photoCats.length ? `
+                  <div class="photo-cat-overlay">
+                    ${photoCats.slice(0,2).map(c => `<span class="photo-cat-chip"><span class="cat-dot" style="background:${c.colorHex};"></span>${c.name}</span>`).join('')}
+                  </div>` : ''}
+                ${appState.displayMode === 'SMALL_PREVIEW' && photoCats.length ? `
+                  <div class="photo-cat-overlay" style="bottom:4px; left:4px; background:rgba(0,0,0,0.45); padding:2px 4px; border-radius:5px;">
+                    ${photoCats.slice(0,2).map(c => `<span class="cat-dot" style="background:${c.colorHex};"></span>`).join('')}
+                  </div>` : ''}
+              </div>
+            </div>
+            <div class="photo-card-meta">
+              <span>${p.date}</span>
+              ${hasSchedule ? `<span title="${isShopping ? 'Lên lịch mua' : 'Lên lịch hẹn'}" style="color:${isShopping ? 'var(--ochre)' : 'var(--teal)'}; font-weight:700;">◷</span>` : ''}
+            </div>
+          </div>`;
+      }).join('');
+    }
+  }
+
+  // ===================== RENDER CATEGORIES TAB (CLEAN LIST ONLY, NO SHORTCUTS) =====================
+  function renderCategories() {
+    document.getElementById('categoriesSubtitle').textContent = `${categories.length} danh mục`;
+    document.getElementById('btnCreateCatLabel').textContent = appState.isPro ? 'Tạo danh mục' : 'Tạo danh mục (Pro)';
+
+    document.getElementById('catListContainer').innerHTML = categories.map(cat => {
+      const count = photos.filter(p => p.categoryIds.includes(cat.id)).length;
+      const isOpen = appState.openCategoryMenuId === cat.id;
+      return `
+        <div class="cat-row-card" onclick="jumpToCategory('${cat.id}')">
+          <div style="display:flex; align-items:center; gap:13px; min-width:0;">
+            <div class="cat-row-squircle" style="background:${cat.colorHex}; color:#FFFDFA;">
+              ${catIconSvg(cat.iconName, 21)}
+            </div>
+            <div style="min-width:0;">
+              <div style="font-size:14.5px; font-weight:700; color:var(--ink-primary);">${cat.name}</div>
+              <div style="font-size:12px; color:var(--ink-secondary);">${count} ảnh được gắn thẻ</div>
+            </div>
+          </div>
+          <button class="icon-pill-btn" style="width:32px; height:32px; border-radius:10px;" onclick="event.stopPropagation(); toggleCategoryMenu('${cat.id}')">⋮</button>
+          <div class="cat-menu-dropdown ${isOpen ? 'open' : ''}" onclick="event.stopPropagation()">
+            <button class="cat-menu-item" onclick="jumpToCategory('${cat.id}')">🖼 Xem ảnh</button>
+            <button class="cat-menu-item" onclick="runRetroScan('${cat.id}')">✦ Tự động gom ảnh (AI)</button>
+            <button class="cat-menu-item" onclick="openCategoryEditorDialog('${cat.id}')">✎ Chỉnh sửa</button>
+            <button class="cat-menu-item danger" onclick="confirmDeleteCategory('${cat.id}')">🗑 Xóa</button>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  // ===================== RENDER HOUSEKEEPING TAB =====================
+  function renderHousekeeping() {
+    const eventPhotos = photos.filter(p => p.suggestedEventTitle);
+    const shownEvents = appState.isEventsExpanded ? eventPhotos : eventPhotos.slice(0, 2);
+    const shownClutter = appState.isClutterExpanded ? agingClutter : agingClutter.slice(0, 2);
+
+    let html = `
+      <div class="collapsible-card" onclick="appState.isEventsExpanded = !appState.isEventsExpanded; renderHousekeeping()">
+        <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+          <div style="width:36px; height:36px; border-radius:12px; background:var(--plum-light); color:var(--plum); display:grid; place-items:center; flex-shrink:0;">
+            ${catIconSvg('calendar', 18)}
+          </div>
+          <div style="min-width:0;">
+            <div style="font-size:13.5px; font-weight:700;">Sự kiện lịch phát hiện được</div>
+            <div style="font-size:11px; color:var(--ink-secondary);">Sự kiện được trích xuất thông minh từ ảnh</div>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span class="badge-soft">${eventPhotos.length} sự kiện</span>
+          <span style="color:var(--ink-secondary);">${appState.isEventsExpanded ? '▲' : '▼'}</span>
+        </div>
+      </div>`;
+
+    html += shownEvents.map(p => `
+      <div class="event-card" onclick="openViewer('${p.id}')">
+        <div style="width:58px; height:58px; border-radius:12px; background:${p.bgGradient}; flex-shrink:0;"></div>
+        <div style="flex:1; min-width:0;">
+          <span class="intent-tag ${p.detectedIntent === 'SHOPPING' ? 'shopping' : ''}">${p.detectedIntent === 'SHOPPING' ? 'MUA SẮM' : p.detectedIntent === 'READING' ? 'BÀI ĐỌC' : 'SỰ KIỆN'}</span>
+          <div style="font-size:13px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${p.suggestedEventTitle}</div>
+          <div style="font-size:11px; color:var(--ink-secondary); margin-top:2px;">${p.suggestedEventTime}</div>
+        </div>
+        <button class="btn-editorial ${p.hasReminderCreated ? 'muted' : ''}" style="padding:7px 10px; font-size:11px;" onclick="event.stopPropagation(); markEventScheduled('${p.id}')">
+          ${p.hasReminderCreated ? '✓ Đã hẹn' : 'Thêm lịch'}
+        </button>
+      </div>
+    `).join('');
+
+    if (eventPhotos.length > 2) {
+      html += `<button class="expand-outline-btn" onclick="appState.isEventsExpanded = !appState.isEventsExpanded; renderHousekeeping()">
+        ${appState.isEventsExpanded ? 'Thu gọn ▲' : `Xem tất cả ${eventPhotos.length} sự kiện (còn ${eventPhotos.length - 2}) ▼`}
+      </button>`;
+    }
+
+    html += `
+      <div style="height:6px;"></div>
+      <div class="collapsible-card" onclick="appState.isClutterExpanded = !appState.isClutterExpanded; renderHousekeeping()">
+        <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+          <div style="width:36px; height:36px; border-radius:12px; background:var(--ochre-light); color:var(--ochre); display:grid; place-items:center; flex-shrink:0;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>
+          </div>
+          <div style="min-width:0;">
+            <div style="font-size:13.5px; font-weight:700;">Ảnh chụp màn hình cũ & Rác bộ nhớ</div>
+            <div style="font-size:11px; color:var(--ink-secondary);">Cũ hơn 30 ngày · ~5.7 MB có thể giải phóng</div>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span class="badge-soft">${agingClutter.length} ảnh</span>
+          <span style="color:var(--ink-secondary);">${appState.isClutterExpanded ? '▲' : '▼'}</span>
+        </div>
+      </div>
+
+      <div class="monitor-card">
+        <div style="min-width:0;">
+          <div style="font-size:12.5px; font-weight:700; color:var(--teal);">Tự động theo dõi rác nền</div>
+          <div style="font-size:10.5px; color:var(--ink-secondary); margin-top:2px;">Lần kiểm tra gần nhất: 14:20 hôm nay</div>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <button class="btn-editorial muted" style="padding:6px 10px; font-size:11px; background:#FFFDFA;" onclick="showToast('Đã quét xong ${agingClutter.length} ảnh cũ')">Quét ngay</button>
+          <button class="icon-pill-btn" style="width:30px; height:30px; border-radius:10px;" title="Cài đặt dọn dẹp" onclick="openAgingRulesDialog()">⚙</button>
+        </div>
+      </div>`;
+
+    if (agingClutter.length > 0) {
+      html += `
+        <div style="display:flex; justify-content:flex-end;">
+          <button class="btn-editorial" style="background:var(--terracotta); padding:7px 12px; font-size:11.5px;" onclick="cleanAllClutter()">
+            Dọn tất cả (${agingClutter.length})
+          </button>
+        </div>`;
+
+      html += shownClutter.map(c => `
+        <div class="event-card">
+          <div style="width:46px; height:46px; border-radius:12px; background:var(--bg-sand); display:grid; place-items:center; color:var(--ink-secondary); flex-shrink:0;">🖼</div>
+          <div style="flex:1; min-width:0;">
+            <div style="font-size:12.5px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${c.title}</div>
+            <div style="font-size:11px; color:var(--ink-secondary);">${c.ageDays} ngày trước · ${c.size}</div>
+          </div>
+          <button class="icon-pill-btn" style="width:32px; height:32px; border-radius:10px; color:var(--terracotta);" onclick="deleteClutterItem('${c.id}')">✕</button>
+        </div>
+      `).join('');
+
+      if (agingClutter.length > 2) {
+        html += `<button class="expand-outline-btn" onclick="appState.isClutterExpanded = !appState.isClutterExpanded; renderHousekeeping()">
+          ${appState.isClutterExpanded ? 'Thu gọn ▲' : `Xem tất cả ${agingClutter.length} ảnh (còn ${agingClutter.length - 2}) ▼`}
+        </button>`;
+      }
+    } else {
+      html += `
+        <div class="settings-card" style="text-align:center; padding:24px;">
+          <div style="font-family:var(--font-serif); font-size:17px; color:var(--teal); font-weight:600;">Thư viện ảnh của bạn thật gọn gàng!</div>
+          <div style="font-size:12px; color:var(--ink-secondary); margin-top:4px;">Không có ảnh chụp màn hình cũ hoặc đã xử lý nào cần dọn dẹp.</div>
+        </div>`;
+    }
+
+    document.getElementById('hkContainer').innerHTML = html;
+  }
+
+  // ===================== RENDER SETTINGS TAB =====================
+  function renderSettings() {
+    const used = appState.isQuotaExhausted ? 50 : 32;
+    const pct = appState.isPro ? 100 : (used / 50) * 100;
+    const encryptedCount = photos.filter(p => p.isEncrypted).length;
+
+    document.getElementById('settingsContainer').innerHTML = `
+      <div class="settings-card ${appState.isPro ? 'pro-bg' : ''}">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+          <div style="display:flex; align-items:center; gap:11px;">
+            <div style="width:40px; height:40px; border-radius:14px; background:${appState.isPro ? 'var(--teal)' : 'var(--bg-sand)'}; color:${appState.isPro ? '#FFFDFA' : 'var(--teal)'}; display:grid; place-items:center;">
+              ${appState.isPro ? '★' : '✦'}
+            </div>
+            <div>
+              <div style="font-size:15px; font-weight:700;">${appState.isPro ? 'Gói Pro' : 'Gói Miễn phí'}</div>
+              <div style="font-size:11.5px; color:var(--ink-secondary);">${appState.isPro ? 'Không giới hạn quét AI & Bảo vệ PII' : '50 lượt quét OCR miễn phí mỗi tháng'}</div>
+            </div>
+          </div>
+          <label class="switch" title="Chế độ Pro (Debug)">
+            <input type="checkbox" ${appState.isPro ? 'checked' : ''} onchange="setTierState(this.checked, false)" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        ${appState.isPro ? `
+          <div style="margin-top:12px; background:var(--teal-soft); color:var(--teal); font-size:11.5px; font-weight:600; padding:9px 11px; border-radius:12px;">
+            ✓ Đang kích hoạt: Quét AI không giới hạn, đồng bộ Lịch & bảo vệ PII trên thiết bị
+          </div>` : `
+          <div style="margin-top:14px;">
+            <div style="display:flex; justify-content:space-between; font-size:11.5px; font-weight:600;">
+              <span>Lượt dùng AI</span>
+              <span style="color:var(--teal);">${used} / 50</span>
+            </div>
+            <div class="quota-bar-track"><div class="quota-bar-fill" style="width:${pct}%;"></div></div>
+          </div>`}
+      </div>
+
+      <div class="settings-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+          <div style="display:flex; align-items:center; gap:11px;">
+            <div style="width:40px; height:40px; border-radius:14px; background:${appState.isVaultEnabled ? 'var(--sage-light)' : 'var(--bg-sand)'}; color:var(--teal); display:grid; place-items:center;">
+              ${catIconSvg('shield', 19)}
+            </div>
+            <div>
+              <div style="font-size:14px; font-weight:700;">Két bảo mật & Khóa máy</div>
+              <div style="font-size:11.5px; color:var(--ink-secondary); line-height:1.4;">${appState.isVaultEnabled ? 'Ảnh màn hình được bảo vệ riêng tư và yêu cầu mở khóa máy khi vào app' : 'Ảnh màn hình hiển thị bình thường ở Bộ sưu tập máy'}</div>
+            </div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" ${appState.isVaultEnabled ? 'checked' : ''} onchange="appState.isVaultEnabled = this.checked; renderSettings(); showToast(this.checked ? 'Đã bật Két bảo mật' : 'Đã tắt Két bảo mật')" />
+            <span class="slider"></span>
+          </label>
+        </div>
+        ${appState.isVaultEnabled ? `
+          <button class="btn-editorial muted" style="width:100%; justify-content:center; margin-top:12px;" onclick="openLockPreview()">
+            Xem thử màn hình Khóa Két bảo mật
+          </button>` : ''}
+      </div>
+
+      ${(appState.isVaultEnabled || encryptedCount > 0) ? `
+      <div class="settings-card warning-bg">
+        <div style="font-size:12px; font-weight:800; color:#8A5A19; letter-spacing:0.03em; margin-bottom:6px;">
+          ⚠ LƯU Ý QUAN TRỌNG KHI GỠ ỨNG DỤNG
+        </div>
+        <div style="font-size:11.5px; color:#7A511A; line-height:1.5; margin-bottom:11px;">
+          • Ảnh trong Két được mã hóa tại bộ nhớ riêng.<br/>
+          • Hệ điều hành sẽ xóa toàn bộ ảnh trong Két nếu gỡ app. Hãy khôi phục trước khi gỡ cài đặt.
+        </div>
+        <button class="btn-editorial ochre" style="width:100%; justify-content:center;" onclick="showToast('Sẵn sàng khôi phục ${encryptedCount} ảnh về máy')">
+          Khôi phục ${encryptedCount} ảnh về máy ngay
+        </button>
+      </div>` : ''}
+
+      <div class="settings-card">
+        <div style="font-size:14px; font-weight:700; margin-bottom:4px;">Thanh tìm kiếm màn hình chính (Widget)</div>
+        <div style="font-size:11.5px; color:var(--ink-secondary); line-height:1.45; margin-bottom:12px;">
+          Đặt thanh tìm kiếm 1 chạm ra màn hình chính (kéo giãn 4×1 / 4×2, hỗ trợ nền tối). Chạm vào để tìm ngay mọi ảnh bằng OCR & AI.
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn-editorial" style="flex:1; justify-content:center;" onclick="showToast('Đã gửi yêu cầu ghim Widget ra màn hình chính')">Ghim Widget</button>
+          <button class="btn-editorial muted" style="flex:1; justify-content:center;" onclick="openQuickSearchDialog()">Mở tìm kiếm</button>
+        </div>
+      </div>
+    `;
+  }
+
+  // ===================== VIEWER & PHOTO SETTINGS (100% PARITY) =====================
+  function openViewer(photoId) {
+    appState.viewingPhotoId = photoId;
+    renderViewer();
+    document.getElementById('viewerModal').classList.add('open');
+  }
+
+  function closeViewer() {
+    document.getElementById('viewerModal').classList.remove('open');
+    closeActionDrawer();
+  }
+
+  function renderViewer() {
+    const idx = photos.findIndex(p => p.id === appState.viewingPhotoId);
+    const photo = photos[idx >= 0 ? idx : 0];
+    if (!photo) return;
+
+    document.getElementById('viewerCounter').textContent = `${idx + 1} / ${photos.length} • ${photo.date}`;
+    const favBtn = document.getElementById('viewerFavBtn');
+    favBtn.style.color = photo.isFavorite ? '#F2957E' : '#FFFFFF';
+    favBtn.querySelector('svg').setAttribute('fill', photo.isFavorite ? 'currentColor' : 'none');
+
+    document.getElementById('viewerCanvas').innerHTML = `
+      <div style="width:100%; max-width:300px; aspect-ratio:3/4; border-radius:24px; background:${photo.bgGradient}; padding:20px; display:flex; flex-direction:column; justify-content:space-between; color:var(--ink-primary); box-shadow:0 24px 48px rgba(0,0,0,0.38);">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-size:10px; font-weight:800; letter-spacing:0.06em; color:var(--teal); background:rgba(255,253,250,0.78); padding:4px 9px; border-radius:99px;">
+            ${photo.isEncrypted ? '🔒 Đã mã hóa Két' : 'Ảnh gốc'}
+          </span>
+          <span style="font-size:11px; color:var(--ink-secondary);">${photo.size}</span>
+        </div>
+        <div style="background:rgba(255,253,250,0.88); border-radius:18px; padding:16px; border:1px solid rgba(255,255,255,0.8);">
+          <div style="font-family:var(--font-serif); font-size:18px; font-weight:600; color:var(--teal); margin-bottom:6px;">${photo.title}</div>
+          <div style="font-size:11.5px; color:var(--ink-secondary); line-height:1.45;">${photo.ocrText}</div>
+        </div>
+      </div>`;
+
+    const photoCats = categories.filter(c => photo.categoryIds.includes(c.id));
+    const currentFolder = folders.find(f => f.id === photo.folderId);
+    const hasEventCard = photo.actionCards.some(c => c.type === 'EVENT');
+    const isShopping = photo.detectedIntent === 'SHOPPING' || photo.categoryIds.includes('cat_tobuy');
+    const isEvent = photo.detectedIntent === 'EVENT' || photo.categoryIds.includes('cat_events') || !!photo.suggestedEventTitle;
+
+    const peekHtml = photo.actionCards.length > 0 ? `
+      <div onclick="openActionDrawer()" style="background:rgba(255,253,250,0.12); border:1px solid rgba(184,144,84,0.55); border-radius:14px; padding:10px 13px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; cursor:pointer;">
+        <div style="font-size:12px; font-weight:600; display:flex; align-items:center; gap:8px;">
+          <span style="color:var(--ochre);">✦</span>
+          <span>${photo.actionCards.length === 1 ? photo.actionCards[0].title : `${photo.actionCards.length} thông tin hành động • Chạm để mở`}</span>
+        </div>
+        <span>▲</span>
+      </div>` : '';
+
+    document.getElementById('viewerBottomBar').innerHTML = `
+      ${peekHtml}
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
+        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+          <span style="font-size:11.5px; color:#D5D7CC;">📁 ${currentFolder ? currentFolder.name : 'Cuộn camera'}</span>
+          ${photoCats.slice(0, 2).map(c => `<span style="font-size:10.5px; background:rgba(255,255,255,0.15); padding:3px 8px; border-radius:99px;">${c.name}</span>`).join('')}
+        </div>
+        ${(!hasEventCard && (isShopping || isEvent)) ? `
+          <button class="btn-editorial ochre" style="padding:6px 10px; font-size:11px;" onclick="markEventScheduled('${photo.id}'); renderViewer();">
+            ${photo.hasReminderCreated ? 'Đã lên lịch' : isShopping ? 'Đặt lịch mua' : 'Thêm vào lịch'}
+          </button>` : ''}
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:6px;">
+        <button class="btn-editorial muted" style="padding:5px 10px; font-size:11px;" onclick="stepViewer(-1)">‹ Ảnh trước</button>
+        <button class="btn-editorial muted" style="padding:5px 10px; font-size:11px;" onclick="stepViewer(1)">Ảnh sau ›</button>
+      </div>`;
+  }
+
+  function stepViewer(delta) {
+    const idx = photos.findIndex(p => p.id === appState.viewingPhotoId);
+    const next = (idx + delta + photos.length) % photos.length;
+    appState.viewingPhotoId = photos[next].id;
+    renderViewer();
+  }
+
+  function toggleViewerFav() {
+    togglePhotoFavorite(appState.viewingPhotoId);
+    renderViewer();
+  }
+
+  function openActionDrawer() {
+    const photo = photos.find(p => p.id === appState.viewingPhotoId);
+    if (!photo || !photo.actionCards.length) return;
+    document.getElementById('drawerTitle').textContent = `Thông tin & Hành động 1 chạm (${photo.actionCards.length})`;
+    document.getElementById('actionDrawerItems').innerHTML = photo.actionCards.map(c => `
+      <div class="action-item-box">
+        <div style="font-size:13px; font-weight:700;">${c.title}</div>
+        <div style="font-size:11.5px; color:rgba(255,253,250,0.72); margin:2px 0 8px;">${c.subtitle}</div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          ${c.buttons.map((b, i) => `
+            <button class="btn-editorial ${i === 0 ? 'ochre' : 'muted'}" style="padding:6px 10px; font-size:11px; ${i > 0 ? 'background:rgba(255,255,255,0.18); color:#fff; border-color:transparent;' : ''}" onclick="showToast('${b}: ${c.title}')">${b}</button>
+          `).join('')}
+        </div>
+      </div>
+    `).join('');
+    document.getElementById('actionDrawerModal').classList.add('open');
+  }
+
+  function closeActionDrawer() {
+    document.getElementById('actionDrawerModal').classList.remove('open');
+  }
+
+  // Exact PhotoSettingsDialog parity
+  let tempPhotoEdit = null;
+
+  function openPhotoSettingsFromViewer() {
+    const photo = photos.find(p => p.id === appState.viewingPhotoId);
+    if (!photo) return;
+    tempPhotoEdit = {
+      id: photo.id,
+      title: photo.title,
+      folderId: photo.folderId,
+      categoryIds: [...photo.categoryIds],
+      isFavorite: photo.isFavorite
+    };
+    renderPhotoSettingsDialog();
+  }
+
+  function renderPhotoSettingsDialog() {
+    const photo = photos.find(p => p.id === tempPhotoEdit.id);
+    if (!photo) return;
+
+    openCenterDialog(`
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="font-family:var(--font-serif); margin:0; font-size:20px; color:var(--teal);">Cài đặt ảnh</h3>
+        <button onclick="closeCenterDialog()" style="border:none;background:var(--bg-sand);width:28px;height:28px;border-radius:50%;cursor:pointer;">✕</button>
+      </div>
+
+      <div style="font-size:12px; font-weight:700; color:var(--ink-primary); margin-bottom:4px;">Tiêu đề ảnh</div>
+      <input id="psTitleInput" value="${tempPhotoEdit.title}" oninput="tempPhotoEdit.title=this.value" style="width:100%;padding:9px 11px;border-radius:12px;border:1px solid var(--border-sand);background:var(--bg-canvas);font-family:var(--font-sans);font-size:13px;margin-bottom:12px;"/>
+
+      <div style="font-size:12px; font-weight:700; color:var(--ink-primary); margin-bottom:4px;">Thư mục lưu trữ</div>
+      <select onchange="tempPhotoEdit.folderId=this.value" style="width:100%;padding:9px 11px;border-radius:12px;border:1px solid var(--border-sand);background:var(--bg-canvas);font-family:var(--font-sans);font-size:13px;margin-bottom:12px;">
+        ${folders.map(f => `<option value="${f.id}" ${tempPhotoEdit.folderId === f.id ? 'selected' : ''}>📁 ${f.name}</option>`).join('')}
+      </select>
+
+      <div style="font-size:12px; font-weight:700; color:var(--ink-primary); margin-bottom:6px;">Gán danh mục & Thẻ</div>
+      <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px;">
+        ${categories.map(c => {
+          const sel = tempPhotoEdit.categoryIds.includes(c.id);
+          return `
+            <button type="button" onclick="toggleTempPhotoCat('${c.id}')" style="border:1px solid ${sel ? c.colorHex : 'var(--border-sand)'}; background:${sel ? c.colorHex + '22' : 'var(--bg-sand-soft)'}; color:${sel ? c.colorHex : 'var(--ink-primary)'}; border-radius:99px; padding:5px 10px; font-size:11.5px; font-weight:${sel ? 700 : 500}; display:inline-flex; align-items:center; gap:5px; cursor:pointer;">
+              <span style="width:7px; height:7px; border-radius:50%; background:${c.colorHex};"></span>${c.name}
+            </button>`;
+        }).join('')}
+      </div>
+
+      <div style="font-size:11px; color:var(--ink-secondary); line-height:1.45; margin-bottom:10px;">
+        Tập tin: ${photo.fileName} (${photo.size})<br/>
+        Ngày tạo: ${photo.date}
+      </div>
+
+      <button class="btn-editorial muted" style="width:100%; justify-content:center; margin-bottom:10px;" onclick="showToast('Đang quét lại OCR & trích xuất thông tin...')">
+        🔍 ${photo.isProcessed ? 'Quét lại ảnh' : 'Quét & trích xuất thông tin'}
+      </button>
+
+      <div style="display:flex; gap:8px; margin-bottom:10px;">
+        <button class="btn-editorial ${tempPhotoEdit.isFavorite ? 'danger-soft' : 'muted'}" style="flex:1; justify-content:center;" onclick="tempPhotoEdit.isFavorite=!tempPhotoEdit.isFavorite; renderPhotoSettingsDialog();">
+          ${tempPhotoEdit.isFavorite ? '♥ Đã thích' : '♡ Yêu thích'}
+        </button>
+        <button class="btn-editorial danger-soft" style="flex:1; justify-content:center;" onclick="confirmDeletePhoto('${photo.id}')">
+          🗑 Xóa
+        </button>
+      </div>
+
+      <button class="btn-editorial muted" style="width:100%; justify-content:center; margin-bottom:12px;" onclick="confirmVaultPhoto('${photo.id}')">
+        ${photo.isEncrypted ? '🔓 Khôi phục ảnh về Bộ sưu tập' : '🔒 Chuyển ảnh vào Két bảo mật'}
+      </button>
+
+      <button class="btn-editorial" style="width:100%; justify-content:center; padding:11px;" onclick="savePhotoSettings()">
+        Lưu thay đổi
+      </button>
+    `);
+  }
+
+  function toggleTempPhotoCat(catId) {
+    const idx = tempPhotoEdit.categoryIds.indexOf(catId);
+    if (idx >= 0) tempPhotoEdit.categoryIds.splice(idx, 1);
+    else tempPhotoEdit.categoryIds.push(catId);
+    renderPhotoSettingsDialog();
+  }
+
+  function savePhotoSettings() {
+    const p = photos.find(x => x.id === tempPhotoEdit.id);
+    if (p) {
+      p.title = tempPhotoEdit.title.trim() || p.title;
+      p.folderId = tempPhotoEdit.folderId;
+      p.categoryIds = [...tempPhotoEdit.categoryIds];
+      p.isFavorite = tempPhotoEdit.isFavorite;
+    }
+    closeCenterDialog();
+    renderViewer();
+    renderGallery();
+    renderCategories();
+    showToast('Đã lưu thay đổi ảnh');
+  }
+
+  function confirmDeletePhoto(id) {
+    const p = photos.find(x => x.id === id);
+    openCenterDialog(`
+      <h3 style="font-family:var(--font-serif); margin:0 0 8px; font-size:19px; color:var(--terracotta);">Xóa ảnh?</h3>
+      <p style="font-size:12.5px; color:var(--ink-secondary); line-height:1.5; margin:0 0 16px;">
+        Bạn có chắc chắn muốn xóa '${p.title}'? Hành động này không thể hoàn tác.
+      </p>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-editorial muted" style="flex:1; justify-content:center;" onclick="renderPhotoSettingsDialog()">Hủy</button>
+        <button class="btn-editorial" style="flex:1; justify-content:center; background:var(--terracotta);" onclick="photos = photos.filter(x=>x.id!=='${id}'); closeCenterDialog(); closeViewer(); renderGallery(); renderCategories(); showToast('Đã xóa ảnh');">Xóa</button>
+      </div>
+    `);
+  }
+
+  function confirmVaultPhoto(id) {
+    const p = photos.find(x => x.id === id);
+    openCenterDialog(`
+      <h3 style="font-family:var(--font-serif); margin:0 0 8px; font-size:19px; color:var(--teal);">${p.isEncrypted ? 'Khôi phục ảnh về máy?' : 'Chuyển vào Két bảo mật?'}</h3>
+      <p style="font-size:12.5px; color:var(--ink-secondary); line-height:1.5; margin:0 0 16px;">
+        ${p.isEncrypted ? 'Ảnh sẽ được giải mã và lưu lại vào thư viện ảnh công khai của thiết bị.' : 'Ảnh sẽ được mã hóa an toàn và chỉ có thể truy cập khi mở khóa ứng dụng.'}
+      </p>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-editorial muted" style="flex:1; justify-content:center;" onclick="renderPhotoSettingsDialog()">Hủy</button>
+        <button class="btn-editorial" style="flex:1; justify-content:center;" onclick="const x=photos.find(k=>k.id==='${id}'); x.isEncrypted=!x.isEncrypted; closeCenterDialog(); renderViewer(); renderGallery(); renderSettings(); showToast(x.isEncrypted ? 'Đã mã hóa ảnh vào Két' : 'Đã khôi phục ảnh về máy');">Đồng ý</button>
+      </div>
+    `);
+  }
+
+  // ===================== CREATE / RENAME CATEGORY WITH GRADIENT PICKER + ICON PICKER =====================
+  let catEditorState = null;
+
+  function handleCreateCategoryClick() {
+    if (!appState.isPro) {
+      openCenterDialog(`
+        <h3 style="font-family:var(--font-serif); margin:0 0 8px; font-size:20px; color:var(--teal);">Danh mục AI tùy chỉnh (Pro)</h3>
+        <p style="font-size:12.5px; color:var(--ink-secondary); line-height:1.5; margin:0 0 14px;">
+          Gói Miễn phí sử dụng các danh mục chuẩn cố định. Nâng cấp Pro để tự tạo danh mục riêng không giới hạn!
+        </p>
+        <div style="display:flex; gap:8px;">
+          <button class="btn-editorial muted" style="flex:1; justify-content:center;" onclick="closeCenterDialog()">Đã hiểu</button>
+          <button class="btn-editorial" style="flex:1; justify-content:center;" onclick="setTierState(true, false); closeCenterDialog();">Thử Pro ngay</button>
+        </div>
+      `);
+      return;
+    }
+    openCategoryEditorDialog(null);
+  }
+
+  function openCategoryEditorDialog(catId) {
+    appState.openCategoryMenuId = null;
+    const existing = catId ? categories.find(c => c.id === catId) : null;
+    const initialColor = existing ? existing.colorHex : '#1E4240';
+    catEditorState = {
+      id: existing ? existing.id : null,
+      name: existing ? existing.name : '',
+      colorHex: initialColor,
+      sliderPos: closestGradientPercent(initialColor),
+      iconName: existing ? existing.iconName : 'tag'
+    };
+    renderCategoryEditorDialog();
+  }
+
+  function renderCategoryEditorDialog() {
+    const isEdit = !!catEditorState.id;
+    openCenterDialog(`
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="font-family:var(--font-serif); margin:0; font-size:20px; color:var(--teal);">${isEdit ? 'Chỉnh sửa danh mục' : 'Tạo danh mục mới'}</h3>
+        <button onclick="closeCenterDialog()" style="border:none;background:var(--bg-sand);width:28px;height:28px;border-radius:50%;cursor:pointer;">✕</button>
+      </div>
+
+      <!-- Live Squircle Preview -->
+      <div style="display:flex; align-items:center; gap:12px; background:var(--bg-canvas); border:1px solid var(--border-sand); border-radius:16px; padding:10px 12px; margin-bottom:12px;">
+        <div id="catPreviewSquircle" style="width:46px; height:46px; border-radius:15px; background:${catEditorState.colorHex}; color:#FFFDFA; display:grid; place-items:center; flex-shrink:0;">
+          ${catIconSvg(catEditorState.iconName, 21)}
+        </div>
+        <div style="min-width:0;">
+          <div id="catPreviewTitle" style="font-size:14px; font-weight:700; color:var(--ink-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${catEditorState.name || 'Xem trước danh mục'}</div>
+          <div id="catPreviewHex" style="font-size:11px; color:var(--ink-secondary);">Màu đã chọn: ${catEditorState.colorHex}</div>
+        </div>
+      </div>
+
+      <div style="font-size:12px; font-weight:700; color:var(--ink-primary); margin-bottom:5px;">Tên danh mục</div>
+      <input id="catEditorNameInput" value="${catEditorState.name}" placeholder="Ví dụ: Thiên nhiên, Du lịch, Sự kiện..." oninput="catEditorState.name=this.value; document.getElementById('catPreviewTitle').textContent = this.value || 'Xem trước danh mục';" style="width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--border-sand);background:var(--bg-canvas);font-family:var(--font-sans);font-size:13px;margin-bottom:14px;"/>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+        <span style="font-size:12px; font-weight:700; color:var(--ink-primary);">Màu sắc danh mục (Thanh Gradient)</span>
+        <span id="catHexPill" style="font-size:10.5px; font-weight:700; color:var(--ink-secondary); background:var(--bg-sand); padding:2px 7px; border-radius:7px;">${catEditorState.colorHex}</span>
+      </div>
+      <div class="gradient-picker-wrap" style="margin-bottom:14px;">
+        <div class="gradient-track-box">
+          <input type="range" min="0" max="100" value="${catEditorState.sliderPos}" class="gradient-range-input" oninput="updateCatGradientColor(this.value)" />
+        </div>
+      </div>
+
+      <div style="font-size:12px; font-weight:700; color:var(--ink-primary); margin-bottom:7px;">Biểu tượng danh mục</div>
+      <div class="icon-picker-row" style="margin-bottom:18px;">
+        ${CATEGORY_ICONS.map(ic => {
+          const sel = catEditorState.iconName === ic.id;
+          return `
+            <button type="button" class="icon-choice-btn" onclick="selectCatEditorIcon('${ic.id}')" style="${sel ? `background:${catEditorState.colorHex}20; border:2px solid ${catEditorState.colorHex}; color:${catEditorState.colorHex};` : ''}" title="${ic.label}">
+              ${catIconSvg(ic.id, 19)}
+            </button>`;
+        }).join('')}
+      </div>
+
+      <div style="display:flex; gap:8px;">
+        <button class="btn-editorial muted" style="flex:1; justify-content:center;" onclick="closeCenterDialog()">Hủy</button>
+        <button class="btn-editorial" style="flex:1; justify-content:center;" onclick="saveCategoryEditor()">${isEdit ? 'Lưu' : 'Tạo danh mục'}</button>
+      </div>
+    `);
+  }
+
+  function updateCatGradientColor(val) {
+    catEditorState.sliderPos = Number(val);
+    catEditorState.colorHex = sampleThemeGradient(val);
+    document.getElementById('catPreviewSquircle').style.background = catEditorState.colorHex;
+    document.getElementById('catPreviewHex').textContent = `Màu đã chọn: ${catEditorState.colorHex}`;
+    document.getElementById('catHexPill').textContent = catEditorState.colorHex;
+    document.querySelectorAll('.icon-picker-row .icon-choice-btn').forEach((btn, idx) => {
+      if (CATEGORY_ICONS[idx].id === catEditorState.iconName) {
+        btn.style.background = catEditorState.colorHex + '20';
+        btn.style.border = `2px solid ${catEditorState.colorHex}`;
+        btn.style.color = catEditorState.colorHex;
+      }
+    });
+  }
+
+  function selectCatEditorIcon(iconId) {
+    catEditorState.iconName = iconId;
+    renderCategoryEditorDialog();
+  }
+
+  function saveCategoryEditor() {
+    const cleanName = (catEditorState.name || '').trim();
+    if (!cleanName) {
+      showToast('Vui lòng nhập tên danh mục');
+      return;
+    }
+    if (catEditorState.id) {
+      const target = categories.find(c => c.id === catEditorState.id);
+      if (target) {
+        target.name = cleanName;
+        target.colorHex = catEditorState.colorHex;
+        target.iconName = catEditorState.iconName;
+      }
+      showToast(`Đã cập nhật "${cleanName}"`);
+    } else {
+      categories.push({
+        id: 'cat_' + Date.now(),
+        name: cleanName,
+        colorHex: catEditorState.colorHex,
+        iconName: catEditorState.iconName
+      });
+      showToast(`Đã tạo danh mục "${cleanName}"`);
+    }
+    closeCenterDialog();
+    renderCategories();
+    renderGallery();
+  }
+
+  function confirmDeleteCategory(catId) {
+    appState.openCategoryMenuId = null;
+    const cat = categories.find(c => c.id === catId);
+    openCenterDialog(`
+      <h3 style="font-family:var(--font-serif); margin:0 0 8px; font-size:19px; color:var(--terracotta);">Xóa danh mục '${cat.name}'?</h3>
+      <p style="font-size:12.5px; color:var(--ink-secondary); line-height:1.5; margin:0 0 16px;">
+        Thẻ này sẽ bị xóa khỏi các ảnh đã gán thẻ. Ảnh của bạn sẽ không bị xóa.
+      </p>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-editorial muted" style="flex:1; justify-content:center;" onclick="closeCenterDialog()">Hủy</button>
+        <button class="btn-editorial" style="flex:1; justify-content:center; background:var(--terracotta);" onclick="deleteCategoryDemo('${catId}'); closeCenterDialog();">Xóa</button>
+      </div>
+    `);
+  }
+
+  function openSemanticUpgradeDialog() {
+    openCenterDialog(`
+      <div style="text-align:center;">
+        <div style="width:46px;height:46px;border-radius:16px;background:var(--plum-light);color:var(--plum);display:grid;place-items:center;margin:0 auto 10px;font-size:20px;">✦</div>
+        <h3 style="font-family:var(--font-serif); margin:0 0 8px; font-size:20px; color:var(--teal);">Tìm kiếm ngữ nghĩa nâng cao</h3>
+        <p style="font-size:12.5px; color:var(--ink-secondary); line-height:1.5; margin:0 0 12px;">
+          Nâng cấp lên gói Pro để tìm kiếm ảnh theo ý nghĩa, khái niệm và từ đồng nghĩa (vd: "chuyến bay", "ăn tối", "hóa đơn").
+        </p>
+        <div style="display:flex; gap:8px;">
+          <button class="btn-editorial muted" style="flex:1; justify-content:center;" onclick="closeCenterDialog()">Đóng</button>
+          <button class="btn-editorial" style="flex:1; justify-content:center;" onclick="setTierState(true, false); closeCenterDialog();">Thử chế độ Pro</button>
+        </div>
+      </div>
+    `);
+  }
+
+  function openAgingRulesDialog() {
+    openCenterDialog(`
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h3 style="font-family:var(--font-serif); margin:0; font-size:19px; color:var(--teal);">Thời gian lưu trữ & Dọn dẹp</h3>
+        <button onclick="closeCenterDialog()" style="border:none;background:var(--bg-sand);width:28px;height:28px;border-radius:50%;cursor:pointer;">✕</button>
+      </div>
+      <p style="font-size:12px; color:var(--ink-secondary); line-height:1.45; margin:0 0 12px;">
+        ${appState.isPro ? 'Đặt thời gian lưu trữ riêng cho từng danh mục:' : 'Gói Miễn phí dùng thời gian mặc định chung 30 ngày. Bật Pro để tùy chỉnh theo danh mục.'}
+      </p>
+      <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:14px;">
+        ${categories.map(c => `
+          <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-canvas); padding:9px 11px; border-radius:12px;">
+            <span style="font-size:12.5px; font-weight:600;">${c.name}</span>
+            <span class="badge-soft">${appState.isPro ? (appState.retentionRules[c.id] || 30) + ' ngày' : '30 ngày'}</span>
+          </div>
+        `).join('')}
+      </div>
+      <button class="btn-editorial" style="width:100%; justify-content:center;" onclick="closeCenterDialog()">Xong</button>
+    `);
+  }
+
+  function openQuickSearchDialog() {
+    openCenterDialog(`
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h3 style="font-family:var(--font-serif); margin:0; font-size:19px; color:var(--teal);">Tìm kiếm nhanh (Widget)</h3>
+        <button onclick="closeCenterDialog()" style="border:none;background:var(--bg-sand);width:28px;height:28px;border-radius:50%;cursor:pointer;">✕</button>
+      </div>
+      <p style="font-size:12px; color:var(--ink-secondary); margin:0 0 12px;">Giao diện QuickSearchActivity khi chạm Widget MemoCap từ màn hình chính:</p>
+      <input id="quickSearchBox" placeholder="Tìm ảnh, hóa đơn, địa chỉ..." style="width:100%;padding:11px;border-radius:14px;border:1px solid var(--border-sand);background:var(--bg-canvas);font-family:var(--font-sans);font-size:13px;margin-bottom:12px;"/>
+      <button class="btn-editorial" style="width:100%; justify-content:center;" onclick="const q=document.getElementById('quickSearchBox').value; closeCenterDialog(); switchTab(0); document.getElementById('searchInput').value=q; handleSearchInput(q);">Tìm trong thư viện</button>
+    `);
+  }
+
+  function openCenterDialog(html) {
+    document.getElementById('centerDialogBody').innerHTML = html;
+    document.getElementById('centerDialogModal').classList.add('open');
+  }
+
+  function closeCenterDialog() {
+    document.getElementById('centerDialogModal').classList.remove('open');
+  }
+
+  function openLockPreview() {
+    document.getElementById('appLockModal').classList.add('open');
+  }
+
+  function closeLockPreview() {
+    document.getElementById('appLockModal').classList.remove('open');
+    showToast('Đã xác thực mở khóa MemoCap');
+  }
+
+  // ===================== ACTIONS =====================
+  function toggleFavoriteFilter() {
+    appState.onlyFavorites = !appState.onlyFavorites;
+    renderGallery();
+  }
+
+  function selectActionCardFilter(type) {
+    appState.activeCategoryId = null;
+    appState.activeActionCardType = (appState.activeActionCardType === type && type !== 'ALL') ? 'ALL' : type;
+    renderGallery();
+  }
+
+  function handleSearchInput(val) {
+    appState.searchQuery = val;
+    document.getElementById('btnClearSearch').style.display = val ? 'grid' : 'none';
+    renderGallery();
+  }
+
+  function clearSearchInput() {
+    document.getElementById('searchInput').value = '';
+    handleSearchInput('');
+  }
+
+  function clearAllFilters() {
+    appState.onlyFavorites = false;
+    appState.activeActionCardType = 'ALL';
+    appState.activeCategoryId = null;
+    clearSearchInput();
+    renderGallery();
+  }
+
+  function setDisplayMode(mode) {
+    appState.displayMode = mode;
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+    renderGallery();
+  }
+
+  function togglePhotoFavorite(id) {
+    const p = photos.find(x => x.id === id);
+    if (p) p.isFavorite = !p.isFavorite;
+    renderGallery();
+  }
+
+  function jumpToCategory(catId) {
+    appState.openCategoryMenuId = null;
+    appState.activeCategoryId = catId;
+    appState.activeActionCardType = 'ALL';
+    renderGallery();
+    switchTab(0);
+  }
+
+  function toggleCategoryMenu(catId) {
+    appState.openCategoryMenuId = appState.openCategoryMenuId === catId ? null : catId;
+    renderCategories();
+  }
+
+  function runRetroScan(catId) {
+    appState.openCategoryMenuId = null;
+    renderCategories();
+    const cat = categories.find(c => c.id === catId);
+    showToast(`AI đang quét & gom ảnh vào "${cat.name}"...`);
+  }
+
+  function deleteCategoryDemo(catId) {
+    const idx = categories.findIndex(c => c.id === catId);
+    if (idx >= 0 && categories.length > 1) {
+      const removed = categories.splice(idx, 1)[0];
+      showToast(`Đã xóa danh mục "${removed.name}"`);
+      renderCategories();
+      renderGallery();
+    } else {
+      showToast('Cần giữ lại ít nhất 1 danh mục');
+    }
+  }
+
+  function markEventScheduled(id) {
+    const p = photos.find(x => x.id === id);
+    if (p) p.hasReminderCreated = true;
+    renderHousekeeping();
+    renderGallery();
+    showToast('Đã thêm sự kiện vào Lịch thiết bị');
+  }
+
+  function deleteClutterItem(id) {
+    agingClutter = agingClutter.filter(c => c.id !== id);
+    renderHousekeeping();
+    showToast('Đã xóa 1 ảnh cũ');
+  }
+
+  function cleanAllClutter() {
+    const count = agingClutter.length;
+    agingClutter = [];
+    renderHousekeeping();
+    showToast(`Đã dọn sạch ${count} ảnh chụp màn hình cũ`);
+  }
+
+  function openAddPhotoDemo() {
+    showToast('Mở bộ chọn ảnh hệ thống');
+  }
+
+  function grantPermissionDemo() {
+    appState.hasStoragePermission = true;
+    document.getElementById('simPermBtn').textContent = 'Xin quyền bộ nhớ: Tắt';
+    document.getElementById('simPermBtn').classList.remove('active');
+    renderGallery();
+    showToast('Đã cấp quyền truy cập ảnh');
+  }
+
+  // ===================== STUDIO TWEAKER CONTROLS =====================
+  function setOrbTheme(theme, el) {
+    appState.orbTheme = theme;
+    const root = document.documentElement;
+    if (theme === 'teal') {
+      root.style.setProperty('--orb-top', '#2B5754');
+      root.style.setProperty('--orb-bottom', '#163331');
+      root.style.setProperty('--orb-shadow', 'rgba(30, 66, 64, 0.36)');
+    } else if (theme === 'ochre') {
+      root.style.setProperty('--orb-top', '#CCAA72');
+      root.style.setProperty('--orb-bottom', '#A2783D');
+      root.style.setProperty('--orb-shadow', 'rgba(184, 144, 84, 0.40)');
+    } else {
+      root.style.setProperty('--orb-top', '#96A68F');
+      root.style.setProperty('--orb-bottom', '#64735F');
+      root.style.setProperty('--orb-shadow', 'rgba(100, 115, 95, 0.38)');
+    }
+    el.parentElement.querySelectorAll('.tweak-chip').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+  }
+
+  function setNavLabels(show, el) {
+    appState.showLabels = show;
+    document.getElementById('liquidNavShell').classList.toggle('show-labels', show);
+    renderNavState(currentOrbX, currentOrbY, currentNotchX, dipDepth, appState.activeTab);
+    el.parentElement.querySelectorAll('.tweak-chip').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+  }
+
+  function setAnimDuration(ms, el) {
+    appState.animDuration = ms;
+    el.parentElement.querySelectorAll('.tweak-chip').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+  }
+
+  function setTierState(isPro, exhausted) {
+    appState.isPro = isPro;
+    appState.isQuotaExhausted = exhausted;
+    document.getElementById('simFreeBtn').classList.toggle('active', !isPro && !exhausted);
+    document.getElementById('simExhaustedBtn').classList.toggle('active', !isPro && exhausted);
+    document.getElementById('simProBtn').classList.toggle('active', isPro);
+    renderGallery();
+    renderCategories();
+    renderSettings();
+  }
+
+  function togglePermDemo() {
+    appState.hasStoragePermission = !appState.hasStoragePermission;
+    const btn = document.getElementById('simPermBtn');
+    btn.textContent = `Xin quyền bộ nhớ: ${appState.hasStoragePermission ? 'Tắt' : 'Bật'}`;
+    btn.classList.toggle('active', !appState.hasStoragePermission);
+    renderGallery();
+  }
+
+  function toggleScanDemo() {
+    appState.isScanning = !appState.isScanning;
+    const btn = document.getElementById('simScanBtn');
+    btn.textContent = `Đang quét AI: ${appState.isScanning ? 'Bật' : 'Tắt'}`;
+    btn.classList.toggle('active', appState.isScanning);
+    renderGallery();
+  }
+
+  let toastTimer = null;
+  function showToast(msg) {
+    const t = document.getElementById('phoneToast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+  }
+
+  document.addEventListener('click', () => {
+    if (appState.openCategoryMenuId) {
+      appState.openCategoryMenuId = null;
+      renderCategories();
+    }
+  });
+
+  // Initialize all views
+  initBottomNav();
+  renderGallery();
+  renderCategories();
+  renderHousekeeping();
+  renderSettings();
+</script>
+</body>
+</html>

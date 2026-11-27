@@ -37,7 +37,8 @@ class ImportPhotosUseCase(
                     categoryIds = initialCategories,
                     isScreenshot = true,
                     dateAdded = baseTimestampMillis + index,
-                    fileSizeBytes = stored.fileSizeBytes
+                    fileSizeBytes = stored.fileSizeBytes,
+                    isCategoryUserModified = targetCategoryIds.isNotEmpty()
                 )
 
                 val nowScan = baseTimestampMillis + index

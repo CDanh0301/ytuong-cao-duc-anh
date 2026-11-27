@@ -72,20 +72,22 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.example.test2.PhotoApp
 import com.example.test2.di.AppViewModelFactory
 import com.example.test2.presentation.gallery.GalleryViewModel
 import com.example.test2.presentation.housekeeping.HousekeepingViewModel
+import com.example.test2.presentation.vault.VaultUiEvent
 import com.example.test2.presentation.vault.VaultViewModel
 import com.example.test2.shared.models.ActionCardType
 import com.example.test2.ui.ActionCardIntentHelper
 import com.example.test2.ui.PhotoAppViewModel
+import com.example.test2.ui.SystemBridgeHelper
 import com.example.test2.ui.screens.ActionCardTabPill
 import com.example.test2.ui.screens.AppLockScreen
 import com.example.test2.ui.screens.ConfirmDeleteDialog
 import com.example.test2.ui.screens.ImageViewerDialog
 import com.example.test2.ui.screens.PhotoListRowCard
 import com.example.test2.ui.screens.PhotoSettingsDialog
+import com.example.test2.ui.theme.AppColors
 import com.example.test2.ui.theme.Test2Theme
 import kotlinx.coroutines.delay
 
@@ -120,10 +122,12 @@ class QuickSearchActivity : FragmentActivity() {
                 val galleryState by galleryViewModel.uiState.collectAsState()
                 val vaultState by vaultViewModel.uiState.collectAsState()
 
-                val photos by galleryViewModel.photos.collectAsState()
-                val folders by galleryViewModel.folders.collectAsState()
-                val categories by galleryViewModel.categories.collectAsState()
-                val accountTier by galleryViewModel.accountTier.collectAsState()
+                LaunchedEffect(galleryState.error) {
+                    galleryState.error?.let { msg ->
+                        Toast.makeText(this@QuickSearchActivity, msg, Toast.LENGTH_SHORT).show()
+                        galleryViewModel.dismissError()
+                    }
+                }
 
                 val lifecycleOwner = LocalLifecycleOwner.current
                 DisposableEffect(lifecycleOwner) {
@@ -147,23 +151,21 @@ class QuickSearchActivity : FragmentActivity() {
                     onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
                 }
 
-                if (vaultState.isVaultEnabled && !vaultState.isAppUnlocked) {
-                    AppLockScreen(
-                        onUnlockClick = {
-                            vaultViewModel.authenticate(
+                LaunchedEffect(vaultViewModel) {
+                    vaultViewModel.events.collect { event ->
+                        if (event is VaultUiEvent.RequestBiometricUnlock) {
+                            SystemBridgeHelper.authenticateWithBiometrics(
                                 activity = this@QuickSearchActivity,
                                 onSuccess = { vaultViewModel.unlockApp() },
-                                onError = { errorCode, _ ->
-                                    if (errorCode == androidx.biometric.BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL) {
-                                        Toast.makeText(
-                                            this@QuickSearchActivity,
-                                            "Thiết bị chưa cài đặt mã khóa màn hình (PIN/Vân tay).",
-                                            Toast.LENGTH_LONG
-                                        ).show()
-                                    }
-                                }
+                                noCredentialMessage = "Thiết bị chưa cài đặt mã khóa màn hình (PIN/Vân tay)."
                             )
-                        },
+                        }
+                    }
+                }
+
+                if (vaultState.isVaultEnabled && !vaultState.isAppUnlocked) {
+                    AppLockScreen(
+                        onUnlockClick = { vaultViewModel.requestBiometricUnlock() },
                         onBackPressed = { finish() }
                     )
                 } else {
@@ -214,7 +216,7 @@ class QuickSearchActivity : FragmentActivity() {
                     Scaffold(
                         modifier = Modifier.fillMaxSize(),
                         contentWindowInsets = WindowInsets.statusBars,
-                        containerColor = Color(0xFFF8FAFC)
+                        containerColor = AppColors.CanvasCream
                     ) { innerPadding ->
                         Column(
                             modifier = Modifier
@@ -224,7 +226,7 @@ class QuickSearchActivity : FragmentActivity() {
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(Color.White)
+                                    .background(AppColors.CanvasCream)
                                     .padding(top = 8.dp, bottom = 8.dp)
                             ) {
                                 Row(
@@ -237,7 +239,7 @@ class QuickSearchActivity : FragmentActivity() {
                                         Icon(
                                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                             contentDescription = "Đóng",
-                                            tint = Color(0xFF0F172A)
+                                            tint = AppColors.DeepPineText
                                         )
                                     }
 
@@ -246,13 +248,13 @@ class QuickSearchActivity : FragmentActivity() {
                                         onValueChange = { searchTextFieldValue = it },
                                         placeholder = {
                                             Text(
-                                                text = if (accountTier.isPro) {
+                                                text = if (galleryState.accountTier.isPro) {
                                                     "Tìm theo từ khóa hoặc ý nghĩa..."
                                                 } else {
                                                     "Tìm ảnh, hóa đơn, địa chỉ..."
                                                 },
                                                 fontSize = 13.5.sp,
-                                                color = Color(0xFF94A3B8),
+                                                color = AppColors.WarmMutedText,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
@@ -261,7 +263,7 @@ class QuickSearchActivity : FragmentActivity() {
                                             Icon(
                                                 Icons.Default.Search,
                                                 contentDescription = null,
-                                                tint = Color(0xFF2563EB),
+                                                tint = AppColors.ForestTeal,
                                                 modifier = Modifier.size(20.dp)
                                             )
                                         },
@@ -274,7 +276,7 @@ class QuickSearchActivity : FragmentActivity() {
                                                     Icon(
                                                         Icons.Default.Close,
                                                         contentDescription = "Xóa",
-                                                        tint = Color(0xFF94A3B8)
+                                                        tint = AppColors.WarmMutedText
                                                     )
                                                 }
                                             }
@@ -291,12 +293,12 @@ class QuickSearchActivity : FragmentActivity() {
                                             }
                                         ),
                                         singleLine = true,
-                                        shape = RoundedCornerShape(14.dp),
+                                        shape = RoundedCornerShape(16.dp),
                                         colors = OutlinedTextFieldDefaults.colors(
-                                            focusedContainerColor = Color(0xFFF8FAFC),
-                                            unfocusedContainerColor = Color(0xFFF8FAFC),
-                                            focusedBorderColor = Color(0xFF2563EB),
-                                            unfocusedBorderColor = Color(0xFFE2E8F0)
+                                            focusedContainerColor = AppColors.SurfaceAlabaster,
+                                            unfocusedContainerColor = AppColors.SurfaceAlabaster,
+                                            focusedBorderColor = AppColors.ForestTeal,
+                                            unfocusedBorderColor = AppColors.BorderSand
                                         ),
                                         modifier = Modifier
                                             .weight(1f)
@@ -312,12 +314,12 @@ class QuickSearchActivity : FragmentActivity() {
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    if (accountTier.isPro) {
+                                    if (galleryState.accountTier.isPro) {
                                         Row(
                                             modifier = Modifier
-                                                .clip(RoundedCornerShape(6.dp))
-                                                .background(Color(0xFFF3E8FF))
-                                                .border(1.dp, Color(0xFFD8B4FE), RoundedCornerShape(6.dp))
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(AppColors.PlumMutedLight)
+                                                .border(1.dp, AppColors.PlumMuted.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
                                                 .padding(horizontal = 8.dp, vertical = 3.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
@@ -325,13 +327,13 @@ class QuickSearchActivity : FragmentActivity() {
                                                 CircularProgressIndicator(
                                                     modifier = Modifier.size(11.dp),
                                                     strokeWidth = 1.8.dp,
-                                                    color = Color(0xFF7E22CE)
+                                                    color = AppColors.PlumMuted
                                                 )
                                             } else {
                                                 Icon(
                                                     Icons.Default.AutoAwesome,
                                                     contentDescription = null,
-                                                    tint = Color(0xFF7E22CE),
+                                                    tint = AppColors.PlumMuted,
                                                     modifier = Modifier.size(13.dp)
                                                 )
                                             }
@@ -340,14 +342,14 @@ class QuickSearchActivity : FragmentActivity() {
                                                 text = if (galleryState.isVectorIndexing) "Đang cập nhật chỉ mục Pro..." else "Tìm kiếm ngữ nghĩa Vector",
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.SemiBold,
-                                                color = Color(0xFF6B21A8)
+                                                color = AppColors.PlumMuted
                                             )
                                         }
                                     } else {
                                         Text(
                                             text = "Tìm kiếm từ khóa OCR cục bộ",
                                             fontSize = 11.sp,
-                                            color = Color(0xFF64748B)
+                                            color = AppColors.WarmTaupeText
                                         )
                                     }
 
@@ -355,11 +357,11 @@ class QuickSearchActivity : FragmentActivity() {
                                         text = if (hasQueryOrFilter) {
                                             "${filteredPhotos.size} kết quả"
                                         } else {
-                                            "Gần đây (${displayedPhotos.size}/${photos.size})"
+                                            "Gần đây (${displayedPhotos.size}/${galleryState.allPhotosCount})"
                                         },
                                         fontSize = 11.5.sp,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = Color(0xFF475569)
+                                        color = AppColors.WarmTaupeText
                                     )
                                 }
 
@@ -373,15 +375,15 @@ class QuickSearchActivity : FragmentActivity() {
                                 ) {
                                     ActionCardTabPill(
                                         label = "Tất cả",
-                                        badgeCount = photos.size,
-                                        color = Color(0xFF2563EB),
+                                        badgeCount = galleryState.allPhotosCount,
+                                        color = AppColors.ForestTeal,
                                         isActive = galleryState.activeActionCardType == ActionCardType.ALL,
                                         onClick = { galleryViewModel.setActionCardFilter(ActionCardType.ALL) }
                                     )
                                     ActionCardTabPill(
                                         label = "📍 Địa chỉ",
                                         badgeCount = galleryState.actionCardPhotoCounts[ActionCardType.ADDRESS] ?: 0,
-                                        color = Color(0xFFEF4444),
+                                        color = AppColors.TerracottaAlert,
                                         isActive = galleryState.activeActionCardType == ActionCardType.ADDRESS,
                                         onClick = {
                                             galleryViewModel.setActionCardFilter(
@@ -392,7 +394,7 @@ class QuickSearchActivity : FragmentActivity() {
                                     ActionCardTabPill(
                                         label = "💳 Chuyển khoản",
                                         badgeCount = galleryState.actionCardPhotoCounts[ActionCardType.PAYMENT] ?: 0,
-                                        color = Color(0xFF0EA5E9),
+                                        color = AppColors.OchreGold,
                                         isActive = galleryState.activeActionCardType == ActionCardType.PAYMENT,
                                         onClick = {
                                             galleryViewModel.setActionCardFilter(
@@ -403,7 +405,7 @@ class QuickSearchActivity : FragmentActivity() {
                                     ActionCardTabPill(
                                         label = "👤 Liên hệ",
                                         badgeCount = galleryState.actionCardPhotoCounts[ActionCardType.CONTACT] ?: 0,
-                                        color = Color(0xFF8B5CF6),
+                                        color = AppColors.SageOlive,
                                         isActive = galleryState.activeActionCardType == ActionCardType.CONTACT,
                                         onClick = {
                                             galleryViewModel.setActionCardFilter(
@@ -425,14 +427,14 @@ class QuickSearchActivity : FragmentActivity() {
                                         Box(
                                             modifier = Modifier
                                                 .size(56.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFFEFF6FF)),
+                                                .clip(RoundedCornerShape(18.dp))
+                                                .background(AppColors.WarmSand),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
                                                 Icons.Default.Search,
                                                 contentDescription = null,
-                                                tint = Color(0xFF2563EB),
+                                                tint = AppColors.ForestTeal,
                                                 modifier = Modifier.size(28.dp)
                                             )
                                         }
@@ -441,7 +443,7 @@ class QuickSearchActivity : FragmentActivity() {
                                             text = if (hasQueryOrFilter) "Không tìm thấy ảnh phù hợp" else "Chưa có ảnh chụp màn hình nào",
                                             fontSize = 16.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF0F172A)
+                                            color = AppColors.DeepPineText
                                         )
                                         if (hasQueryOrFilter) {
                                             Spacer(modifier = Modifier.height(12.dp))
@@ -450,7 +452,8 @@ class QuickSearchActivity : FragmentActivity() {
                                                     searchTextFieldValue = TextFieldValue("")
                                                     galleryViewModel.clearFilters()
                                                 },
-                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                                                shape = RoundedCornerShape(14.dp),
+                                                colors = ButtonDefaults.buttonColors(containerColor = AppColors.ForestTeal)
                                             ) {
                                                 Text("Xóa tìm kiếm")
                                             }
@@ -466,7 +469,7 @@ class QuickSearchActivity : FragmentActivity() {
                                     items(displayedPhotos, key = { it.id }) { photo ->
                                         PhotoListRowCard(
                                             photo = photo,
-                                            categories = categories,
+                                            categories = galleryState.categories,
                                             semanticScore = galleryState.semanticMatchScores[photo.id],
                                             onClick = {
                                                 keyboardController?.hide()
@@ -474,7 +477,6 @@ class QuickSearchActivity : FragmentActivity() {
                                             },
                                             onToggleFavorite = {
                                                 galleryViewModel.toggleFavorite(photo.id)
-                                                PhotoApp.markMetadataDirty()
                                             }
                                         )
                                     }
@@ -487,18 +489,14 @@ class QuickSearchActivity : FragmentActivity() {
                         ImageViewerDialog(
                             photos = filteredPhotos,
                             initialPhotoId = photoId,
-                            folders = folders,
-                            categories = categories,
+                            folders = galleryState.folders,
+                            categories = galleryState.categories,
                             onDismiss = { galleryViewModel.closePhotoViewer() },
                             onOpenSettings = { galleryViewModel.openPhotoSettings(it) },
-                            onToggleFavorite = {
-                                galleryViewModel.toggleFavorite(it.id)
-                                PhotoApp.markMetadataDirty()
-                            },
+                            onToggleFavorite = { galleryViewModel.toggleFavorite(it.id) },
                             onAddToCalendar = { photo ->
                                 if (ActionCardIntentHelper.launchCalendarForPhoto(this@QuickSearchActivity, photo)) {
                                     housekeepingViewModel.markReminderCreated(photo.id)
-                                    PhotoApp.markMetadataDirty()
                                 }
                             },
                             onGetActionCards = { galleryViewModel.getActionCardsForPhoto(it) },
@@ -509,26 +507,16 @@ class QuickSearchActivity : FragmentActivity() {
                     galleryState.photoSettings?.let { photo ->
                         PhotoSettingsDialog(
                             photo = photo,
-                            folders = folders,
-                            categories = categories,
+                            folders = galleryState.folders,
+                            categories = galleryState.categories,
                             onDismiss = { galleryViewModel.closePhotoSettings() },
                             onSave = { title, description, folderId, categoryIds, isFav ->
                                 galleryViewModel.updatePhotoDetails(photo.id, title, description, folderId, categoryIds, isFav)
-                                PhotoApp.markMetadataDirty()
                             },
                             onDelete = { galleryViewModel.setPhotoToDelete(it) },
-                            onScanPhoto = {
-                                galleryViewModel.scanSinglePhoto(it)
-                                PhotoApp.markMetadataDirty()
-                            },
-                            onRestoreSinglePhoto = {
-                                vaultViewModel.restoreSinglePhoto(it)
-                                PhotoApp.markMetadataDirty()
-                            },
-                            onVaultSinglePhoto = {
-                                vaultViewModel.vaultSinglePhoto(it)
-                                PhotoApp.markMetadataDirty()
-                            }
+                            onScanPhoto = { galleryViewModel.scanSinglePhoto(it) },
+                            onRestoreSinglePhoto = { vaultViewModel.restoreSinglePhoto(it) },
+                            onVaultSinglePhoto = { vaultViewModel.vaultSinglePhoto(it) }
                         )
                     }
 
@@ -537,10 +525,7 @@ class QuickSearchActivity : FragmentActivity() {
                             title = "Xóa ảnh?",
                             message = "Bạn có chắc chắn muốn xóa '${photo.title}'? Hành động này không thể hoàn tác.",
                             onDismiss = { galleryViewModel.setPhotoToDelete(null) },
-                            onConfirm = {
-                                galleryViewModel.deletePhotoConfirmed(photo)
-                                PhotoApp.markMetadataDirty()
-                            }
+                            onConfirm = { galleryViewModel.deletePhotoConfirmed(photo) }
                         )
                     }
                 }

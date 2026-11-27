@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FolderShared
@@ -23,12 +22,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.example.test2.ui.theme.AppColors
 
 @Composable
 fun AllFilesAccessDialog(
@@ -38,7 +38,7 @@ fun AllFilesAccessDialog(
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             shape = RoundedCornerShape(24.dp),
-            color = Color.White,
+            color = AppColors.SurfaceAlabaster,
             shadowElevation = 16.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -51,14 +51,14 @@ fun AllFilesAccessDialog(
                 Box(
                     modifier = Modifier
                         .size(60.dp)
-                        .background(Color(0xFFFEF3C7), CircleShape),
+                        .background(AppColors.OchreGoldLight, RoundedCornerShape(18.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.FolderShared,
                         contentDescription = "Quản lý tệp",
-                        tint = Color(0xFFD97706),
-                        modifier = Modifier.size(32.dp)
+                        tint = AppColors.OchreGoldDark,
+                        modifier = Modifier.size(30.dp)
                     )
                 }
 
@@ -66,9 +66,10 @@ fun AllFilesAccessDialog(
 
                 Text(
                     text = "Tự động ẩn ảnh khỏi Bộ sưu tập",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A),
+                    fontFamily = FontFamily.Serif,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AppColors.ForestTeal,
                     textAlign = TextAlign.Center
                 )
 
@@ -77,7 +78,7 @@ fun AllFilesAccessDialog(
                 Text(
                     text = "Để ảnh chụp màn hình tự động chuyển vào Két bảo mật và biến mất khỏi Bộ sưu tập của máy ngay khi chụp (không cần bấm xác nhận mỗi lần), vui lòng cho phép quyền 'Quản lý tất cả tệp' trong cài đặt.",
                     fontSize = 13.sp,
-                    color = Color(0xFF475569),
+                    color = AppColors.WarmTaupeText,
                     textAlign = TextAlign.Center,
                     lineHeight = 18.sp
                 )
@@ -87,7 +88,7 @@ fun AllFilesAccessDialog(
                 Text(
                     text = "(Chỉ cần bật 1 lần duy nhất)",
                     fontSize = 12.sp,
-                    color = Color(0xFF94A3B8),
+                    color = AppColors.WarmMutedText,
                     textAlign = TextAlign.Center
                 )
 
@@ -100,32 +101,22 @@ fun AllFilesAccessDialog(
                     OutlinedButton(
                         onClick = onDismiss,
                         modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = Color(0xFF64748B)
-                        )
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AppColors.WarmTaupeText)
                     ) {
-                        Text(
-                            text = "Để sau",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                        Text(text = "Để sau", fontSize = 13.sp, fontWeight = FontWeight.Medium)
                     }
 
                     Button(
                         onClick = onOpenSettings,
                         modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF2563EB),
-                            contentColor = Color.White
+                            containerColor = AppColors.ForestTeal,
+                            contentColor = AppColors.SurfaceAlabaster
                         )
                     ) {
-                        Text(
-                            text = "Mở Cài đặt",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Text(text = "Mở Cài đặt", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

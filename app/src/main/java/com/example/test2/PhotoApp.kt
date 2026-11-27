@@ -3,12 +3,16 @@ package com.example.test2
 import android.app.Application
 import coil.ImageLoader
 import coil.ImageLoaderFactory
-import com.example.test2.database.AppDatabaseHelper
+import com.example.test2.di.AppContainer
+import com.example.test2.di.AppModule
+import com.example.test2.di.AppViewModelFactory
 import com.example.test2.notifications.ScreenshotNotificationHelper
+import com.example.test2.services.AgingJobScheduler
 import com.example.test2.services.ScreenshotDetectionManager
 import com.example.test2.services.ScreenshotJobScheduler
 import com.example.test2.services.ScreenshotWatcherService
 import com.example.test2.storage.EncryptedPhotoFetcher
+import com.example.test2.util.AppLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -32,8 +36,12 @@ class PhotoApp : Application(), ImageLoaderFactory {
 
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    val dbHelper by lazy {
-        AppDatabaseHelper.getInstance(this)
+    /**
+     * Application-scoped dependency container guaranteeing a single [com.example.test2.shared.repository.IPhotoRepository]
+     * and shared state across [MainActivity], [com.example.test2.search.QuickSearchActivity], and tests.
+     */
+    val container: AppContainer by lazy {
+        AppModule.createContainer(this, AppViewModelFactory.hasStoragePermission(this))
     }
 
     override fun newImageLoader(): ImageLoader {
@@ -69,13 +77,14 @@ class PhotoApp : Application(), ImageLoaderFactory {
         super.onCreate()
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            android.util.Log.e("PhotoApp", "FATAL CRASH on thread ${thread.name}: ${throwable.message}", throwable)
+            AppLogger.e("PhotoApp", "FATAL CRASH on thread ${thread.name}: ${throwable.message}", throwable)
             defaultHandler?.uncaughtException(thread, throwable)
         }
         ScreenshotNotificationHelper.createNotificationChannel(this)
 
-        // 1. Arm JobScheduler with TriggerContentUri (survives process termination/swiping away)
+        // 1. Arm JobScheduler with TriggerContentUri and daily aging monitor worker
         ScreenshotJobScheduler.schedule(this)
+        AgingJobScheduler.schedule(this)
 
         // 2. Start Foreground Monitoring Service (maintains continuous 0ms response in background)
         ScreenshotWatcherService.start(this)

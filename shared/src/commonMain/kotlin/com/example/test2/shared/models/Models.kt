@@ -24,7 +24,8 @@ data class Photo(
     val suggestedEventDateMillis: Long? = null,
     val suggestedEventDescription: String? = null,
     val semanticTags: List<String> = emptyList(),
-    val hasReminderCreated: Boolean = false
+    val hasReminderCreated: Boolean = false,
+    val isCategoryUserModified: Boolean = false
 )
 
 @Serializable
@@ -95,10 +96,17 @@ data class UserAccountTier(
 
 @Serializable
 data class AgingSettings(
-    val retentionDays: Int = 30,
-    val autoArchiveProcessed: Boolean = true,
+    val retentionDays: Int = DEFAULT_RETENTION_DAYS,
+    val autoArchiveProcessed: Boolean = false,
     val categoryRetentionDays: Map<String, Int> = emptyMap()
-)
+) {
+    fun effectiveDefaultRetentionDays(isPro: Boolean): Int =
+        if (isPro) retentionDays.coerceAtLeast(1) else DEFAULT_RETENTION_DAYS
+
+    companion object {
+        const val DEFAULT_RETENTION_DAYS = 30
+    }
+}
 
 @Serializable
 data class AppData(

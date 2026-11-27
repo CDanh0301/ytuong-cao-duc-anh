@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Fingerprint
@@ -27,23 +26,22 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.test2.ui.theme.AppColors
 
 @Composable
 fun AppLockScreen(
     onUnlockClick: () -> Unit,
     onBackPressed: () -> Unit = {}
 ) {
-    // Intercept Back press while locked so user cannot bypass or back into previous screens
     BackHandler(enabled = true) {
         onBackPressed()
     }
 
-    // Automatically trigger biometric/screen lock prompt when lock screen appears
     LaunchedEffect(Unit) {
         onUnlockClick()
     }
@@ -54,84 +52,81 @@ fun AppLockScreen(
             .clickable(
                 indication = null,
                 interactionSource = remember { MutableInteractionSource() }
-            ) {
-                // Actively consume all touch events outside the unlock button
-            }
+            ) { }
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color(0xFF0F172A),
-                        Color(0xFF1E293B)
+                        AppColors.ForestTealDark,
+                        AppColors.ForestTeal,
+                        AppColors.ForestTealLight
                     )
                 )
             ),
         contentAlignment = Alignment.Center
     ) {
         Column(
-            modifier = Modifier
-                .padding(32.dp),
+            modifier = Modifier.padding(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // Glowing Lock Icon Badge
             Box(
                 modifier = Modifier
                     .size(96.dp)
-                    .background(Color(0xFF1E3A8A).copy(alpha = 0.5f), CircleShape)
-                    .padding(8.dp),
+                    .background(AppColors.SurfaceAlabaster.copy(alpha = 0.12f), RoundedCornerShape(28.dp))
+                    .padding(10.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Box(
                     modifier = Modifier
-                        .size(80.dp)
-                        .background(Color(0xFF2563EB), CircleShape),
+                        .size(72.dp)
+                        .background(AppColors.OchreGold, RoundedCornerShape(22.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.Lock,
                         contentDescription = "Đã khóa",
-                        tint = Color.White,
-                        modifier = Modifier.size(42.dp)
+                        tint = AppColors.SurfaceAlabaster,
+                        modifier = Modifier.size(36.dp)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(26.dp))
 
             Text(
-                text = "Két ảnh bảo mật",
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
+                text = "Két ảnh bảo mật.",
+                fontFamily = FontFamily.Serif,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = AppColors.SurfaceAlabaster,
                 textAlign = TextAlign.Center
             )
 
             Spacer(modifier = Modifier.height(10.dp))
 
             Text(
-                text = "Ứng dụng đang được khóa để bảo vệ các ảnh chụp màn hình riêng tư của bạn.",
+                text = "MemoCap đang được khóa để bảo vệ các ảnh chụp màn hình riêng tư của bạn.",
                 fontSize = 14.sp,
-                color = Color(0xFF94A3B8),
+                color = AppColors.SurfaceAlabaster.copy(alpha = 0.78f),
                 textAlign = TextAlign.Center,
                 lineHeight = 20.sp
             )
 
-            Spacer(modifier = Modifier.height(40.dp))
+            Spacer(modifier = Modifier.height(36.dp))
 
             Button(
                 onClick = onUnlockClick,
                 shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF2563EB),
-                    contentColor = Color.White
+                    containerColor = AppColors.OchreGold,
+                    contentColor = AppColors.SurfaceAlabaster
                 ),
-                modifier = Modifier
-                    .height(52.dp)
+                modifier = Modifier.height(52.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Fingerprint,
                     contentDescription = null,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(22.dp)
                 )
                 Spacer(modifier = Modifier.size(10.dp))
                 Text(

@@ -3,18 +3,20 @@ package com.example.test2.shared.usecases.category
 import com.example.test2.shared.models.Category
 import com.example.test2.shared.repository.IPhotoRepository
 import com.example.test2.shared.usecases.FtsIndexPort
+import com.example.test2.shared.usecases.QueueSyncPort
 import com.example.test2.shared.usecases.RetroactiveCategorizerPort
 import com.example.test2.shared.usecases.SemanticSearchPort
 
 /**
  * Use case for scanning existing photos for retroactive custom category assignment
- * and applying the reassignment while keeping FTS5 and vector indexes synchronized.
+ * and applying the reassignment while keeping queue metadata, FTS5, and vector indexes synchronized.
  */
 class RetroactiveCategoryUseCase(
     private val categorizer: RetroactiveCategorizerPort,
     private val searchPort: SemanticSearchPort,
     private val ftsIndexPort: FtsIndexPort,
-    private val repository: IPhotoRepository
+    private val repository: IPhotoRepository,
+    private val queueSyncPort: QueueSyncPort? = null
 ) {
     suspend fun scanForCategory(category: Category, forceReindex: Boolean = false): List<String> {
         searchPort.ensureVectorsIndexed(forceReindex = forceReindex)
@@ -25,6 +27,11 @@ class RetroactiveCategoryUseCase(
     suspend fun applyCategory(photoIds: List<String>, category: Category): Int {
         val count = repository.reassignPhotosToCategory(photoIds, category.id)
         if (count > 0) {
+            queueSyncPort?.updatePhotosCategoryInQueue(
+                photoIds = photoIds,
+                targetCategoryId = category.id,
+                lockCategory = true
+            )
             val idSet = photoIds.toSet()
             val updatedPhotos = repository.photos.value.filter { it.id in idSet }
             for (p in updatedPhotos) {

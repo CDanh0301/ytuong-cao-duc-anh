@@ -1,17 +1,18 @@
 package com.example.test2.data.remote
 
 import android.content.Context
-import com.example.test2.ai.BatchPhotoItem
 import com.example.test2.ai.CloudAiBackendClient
-import com.example.test2.ai.ParsedScreenshotData
+import com.example.test2.data.local.prefs.CloudAiPrefsDataSource
 import com.example.test2.shared.models.Category
 
 /**
- * Default Android implementation of [GeminiApiService] delegating to [CloudAiBackendClient].
+ * Default Android implementation of [GeminiApiService] delegating to [CloudAiBackendClient]
+ * and [com.example.test2.ai.CloudPrivacyGateway].
  */
 class GeminiApiServiceImpl(private val context: Context) : GeminiApiService {
 
     private val appContext = context.applicationContext
+    private val prefsDataSource by lazy { CloudAiPrefsDataSource(appContext) }
 
     override suspend fun analyzeWithFallback(
         scrubbedText: String,
@@ -51,11 +52,14 @@ class GeminiApiServiceImpl(private val context: Context) : GeminiApiService {
         modelName: String,
         taskType: String
     ): FloatArray? {
+        val config = prefsDataSource.getConfig()
+        val effectiveKey = apiKey.ifBlank { config.apiKey }
         return CloudAiBackendClient.getEmbedding(
             text = text,
-            apiKey = apiKey,
+            apiKey = effectiveKey,
             modelName = modelName,
-            taskType = taskType
+            taskType = taskType,
+            proxyBaseUrl = config.proxyBaseUrl
         )
     }
 
@@ -65,11 +69,31 @@ class GeminiApiServiceImpl(private val context: Context) : GeminiApiService {
         modelName: String,
         taskType: String
     ): List<FloatArray?> {
+        val config = prefsDataSource.getConfig()
+        val effectiveKey = apiKey.ifBlank { config.apiKey }
         return CloudAiBackendClient.getBatchEmbeddings(
             texts = texts,
-            apiKey = apiKey,
+            apiKey = effectiveKey,
             modelName = modelName,
-            taskType = taskType
+            taskType = taskType,
+            proxyBaseUrl = config.proxyBaseUrl
+        )
+    }
+
+    override suspend fun verifyCustomCategoryCandidates(
+        category: Category,
+        candidates: List<CategoryCandidateSnippet>,
+        apiKey: String,
+        modelName: String
+    ): List<String> {
+        val config = prefsDataSource.getConfig()
+        val effectiveKey = apiKey.ifBlank { config.apiKey }
+        return CloudAiBackendClient.verifyCustomCategoryCandidates(
+            category = category,
+            candidates = candidates,
+            apiKey = effectiveKey,
+            modelName = modelName,
+            proxyBaseUrl = config.proxyBaseUrl
         )
     }
 }

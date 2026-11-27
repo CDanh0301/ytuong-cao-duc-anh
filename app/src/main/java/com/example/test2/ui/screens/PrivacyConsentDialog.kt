@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -29,13 +28,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.test2.ui.theme.AppColors
 
 @Composable
 fun PrivacyConsentDialog(
@@ -48,7 +48,7 @@ fun PrivacyConsentDialog(
     ) {
         Surface(
             shape = RoundedCornerShape(24.dp),
-            color = Color.White,
+            color = AppColors.SurfaceAlabaster,
             shadowElevation = 16.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -59,29 +59,28 @@ fun PrivacyConsentDialog(
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Header Icon
                 Box(
                     modifier = Modifier
                         .size(64.dp)
-                        .background(Color(0xFFEFF6FF), CircleShape),
+                        .background(AppColors.ForestTealSoft, RoundedCornerShape(20.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.Security,
                         contentDescription = "Bảo mật",
-                        tint = Color(0xFF2563EB),
-                        modifier = Modifier.size(36.dp)
+                        tint = AppColors.ForestTeal,
+                        modifier = Modifier.size(34.dp)
                     )
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Title
                 Text(
                     text = "Bảo vệ riêng tư cho ảnh chụp màn hình?",
-                    fontSize = 19.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A),
+                    fontFamily = FontFamily.Serif,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AppColors.ForestTeal,
                     textAlign = TextAlign.Center
                 )
 
@@ -90,20 +89,19 @@ fun PrivacyConsentDialog(
                 Text(
                     text = "Bạn có muốn giữ các ảnh chụp màn hình của mình riêng tư và an toàn không?",
                     fontSize = 13.sp,
-                    color = Color(0xFF64748B),
+                    color = AppColors.WarmTaupeText,
                     textAlign = TextAlign.Center,
                     lineHeight = 18.sp
                 )
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // Option 1: BẬT BẢO VỆ
                 Surface(
                     shape = RoundedCornerShape(16.dp),
-                    color = Color(0xFFF0FDF4),
+                    color = AppColors.SageOliveLight,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(1.dp, Color(0xFFBBF7D0), RoundedCornerShape(16.dp))
+                        .border(1.dp, AppColors.SageOlive.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
                 ) {
                     Row(
                         modifier = Modifier.padding(14.dp),
@@ -111,14 +109,14 @@ fun PrivacyConsentDialog(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(32.dp)
-                                .background(Color(0xFFDCFCE7), CircleShape),
+                                .size(34.dp)
+                                .background(AppColors.SurfaceAlabaster, RoundedCornerShape(11.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Lock,
                                 contentDescription = null,
-                                tint = Color(0xFF16A34A),
+                                tint = AppColors.ForestTeal,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -130,13 +128,13 @@ fun PrivacyConsentDialog(
                                 text = "BẬT BẢO VỆ",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF15803D)
+                                color = AppColors.ForestTeal
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = "Ảnh chụp màn hình chỉ xem được trong ứng dụng này và không xuất hiện ở Bộ sưu tập hay nơi khác. Dùng khóa máy (vân tay, khuôn mặt hoặc mã PIN) để mở ứng dụng.",
                                 fontSize = 12.sp,
-                                color = Color(0xFF166534),
+                                color = AppColors.DeepPineText,
                                 lineHeight = 17.sp
                             )
                         }
@@ -145,13 +143,12 @@ fun PrivacyConsentDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Option 2: KHÔNG BẬT
                 Surface(
                     shape = RoundedCornerShape(16.dp),
-                    color = Color(0xFFF8FAFC),
+                    color = AppColors.CanvasCream,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(16.dp))
+                        .border(1.dp, AppColors.BorderSand, RoundedCornerShape(16.dp))
                 ) {
                     Row(
                         modifier = Modifier.padding(14.dp),
@@ -159,14 +156,14 @@ fun PrivacyConsentDialog(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(32.dp)
-                                .background(Color(0xFFF1F5F9), CircleShape),
+                                .size(34.dp)
+                                .background(AppColors.WarmSand, RoundedCornerShape(11.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.PhotoLibrary,
                                 contentDescription = null,
-                                tint = Color(0xFF64748B),
+                                tint = AppColors.WarmTaupeText,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -178,13 +175,13 @@ fun PrivacyConsentDialog(
                                 text = "KHÔNG BẬT",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF475569)
+                                color = AppColors.DeepPineText
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = "Ảnh vẫn hiển thị bình thường ở Bộ sưu tập như cũ và không cần mở khóa khi vào ứng dụng.",
                                 fontSize = 12.sp,
-                                color = Color(0xFF64748B),
+                                color = AppColors.WarmTaupeText,
                                 lineHeight = 17.sp
                             )
                         }
@@ -196,13 +193,12 @@ fun PrivacyConsentDialog(
                 Text(
                     text = "Bạn có thể thay đổi lại lựa chọn này bất kỳ lúc nào trong phần Cài đặt.",
                     fontSize = 11.sp,
-                    color = Color(0xFF94A3B8),
+                    color = AppColors.WarmMutedText,
                     textAlign = TextAlign.Center
                 )
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // Action Buttons (Stacked vertically to guarantee full readability on all screen sizes)
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -212,17 +208,13 @@ fun PrivacyConsentDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF2563EB),
-                            contentColor = Color.White
+                            containerColor = AppColors.ForestTeal,
+                            contentColor = AppColors.SurfaceAlabaster
                         )
                     ) {
-                        Text(
-                            text = "Bật bảo vệ",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Text(text = "Bật bảo vệ", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
 
                     OutlinedButton(
@@ -230,16 +222,10 @@ fun PrivacyConsentDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = Color(0xFF475569)
-                        )
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AppColors.WarmTaupeText)
                     ) {
-                        Text(
-                            text = "Không, giữ như cũ",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                        Text(text = "Không, giữ như cũ", fontSize = 13.sp, fontWeight = FontWeight.Medium)
                     }
                 }
             }

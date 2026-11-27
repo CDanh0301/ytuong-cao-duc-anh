@@ -57,7 +57,8 @@ class ScreenshotQueueDaoImpl(
             } else {
                 true
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed enqueuing screenshot $photoId", e)
             false
         }
     }
@@ -93,7 +94,8 @@ class ScreenshotQueueDaoImpl(
                 }
                 db.insertWithOnConflict(TABLE_QUEUE, null, insertValues, SQLiteDatabase.CONFLICT_IGNORE) >= 0
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed syncing vaulted path for $photoId", e)
             false
         }
     }
@@ -124,7 +126,8 @@ class ScreenshotQueueDaoImpl(
                 db.endTransaction()
             }
             count
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed batch enqueuing screenshots", e)
             0
         }
     }
@@ -140,7 +143,7 @@ class ScreenshotQueueDaoImpl(
             val claimedItems = mutableListOf<ScreenshotQueueItem>()
             val safeLimit = limit.coerceIn(1, 20)
             db.rawQuery(
-                "SELECT id, photo_id, file_path, date_added, status, is_live_capture, scrubbed_text, photo_title, original_file_name FROM $TABLE_QUEUE WHERE status = 'PENDING' ORDER BY date_added ASC LIMIT $safeLimit",
+                "SELECT id, photo_id, file_path, date_added, status, is_live_capture, scrubbed_text, photo_title, original_file_name, is_user_categorized, target_category_id FROM $TABLE_QUEUE WHERE status = 'PENDING' ORDER BY date_added ASC LIMIT $safeLimit",
                 null
             ).use { cursor ->
                 val now = System.currentTimeMillis()
@@ -153,6 +156,8 @@ class ScreenshotQueueDaoImpl(
                     val scrubbedText = if (cursor.columnCount > 6) cursor.getString(6) else null
                     val photoTitle = if (cursor.columnCount > 7) cursor.getString(7) else null
                     val originalFileName = if (cursor.columnCount > 8) cursor.getString(8) else null
+                    val isUserCategorized = if (cursor.columnCount > 9) cursor.getInt(9) == 1 else false
+                    val targetCategoryId = if (cursor.columnCount > 10 && !cursor.isNull(10)) cursor.getString(10) else null
 
                     val values = ContentValues().apply {
                         put("status", QueueStatus.PROCESSING.name)
@@ -170,7 +175,9 @@ class ScreenshotQueueDaoImpl(
                                 isLiveCapture = isLiveCapture,
                                 scrubbedText = scrubbedText,
                                 photoTitle = photoTitle,
-                                originalFileName = originalFileName
+                                originalFileName = originalFileName,
+                                targetCategoryId = targetCategoryId,
+                                isUserCategorized = isUserCategorized
                             )
                         )
                     }
@@ -189,6 +196,17 @@ class ScreenshotQueueDaoImpl(
     override fun updateQueueItemState(update: QueueStateUpdate) {
         try {
             val db = dbProvider.writableDatabase
+            var isUserCategorized = false
+            if (!update.forceCategoryUpdate) {
+                db.rawQuery(
+                    "SELECT is_user_categorized FROM $TABLE_QUEUE WHERE photo_id = ?",
+                    arrayOf(update.photoId)
+                ).use { c ->
+                    if (c.moveToFirst() && !c.isNull(0)) {
+                        isUserCategorized = c.getInt(0) == 1
+                    }
+                }
+            }
             val values = ContentValues().apply {
                 put("status", update.status)
                 put("updated_at", System.currentTimeMillis())
@@ -196,7 +214,12 @@ class ScreenshotQueueDaoImpl(
                 if (update.detectedIntent != null) put("detected_intent", update.detectedIntent)
                 if (update.eventTitle != null) put("event_title", update.eventTitle)
                 if (update.eventDateMillis != null) put("event_date_millis", update.eventDateMillis)
-                if (update.targetCategoryId != null) put("target_category_id", update.targetCategoryId)
+                if (update.targetCategoryId != null && (update.forceCategoryUpdate || !isUserCategorized)) {
+                    put("target_category_id", update.targetCategoryId)
+                }
+                if (update.forceCategoryUpdate) {
+                    put("is_user_categorized", 0)
+                }
                 if (update.eventDescription != null) put("event_description", update.eventDescription)
                 if (update.summary != null) put("summary", update.summary)
                 if (update.tags != null) put("tags", update.tags)
@@ -278,7 +301,8 @@ class ScreenshotQueueDaoImpl(
                     )
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed querying pending queue", e)
         }
         return items
     }
@@ -288,7 +312,7 @@ class ScreenshotQueueDaoImpl(
         try {
             val db = dbProvider.readableDatabase
             db.rawQuery(
-                "SELECT id, photo_id, file_path, date_added, status, scrubbed_text, detected_intent, event_title, event_date_millis, target_category_id, event_description FROM $TABLE_QUEUE WHERE needs_cloud_upgrade = 1 LIMIT 20",
+                "SELECT id, photo_id, file_path, date_added, status, scrubbed_text, detected_intent, event_title, event_date_millis, target_category_id, event_description, is_user_categorized FROM $TABLE_QUEUE WHERE needs_cloud_upgrade = 1 LIMIT 20",
                 null
             ).use { cursor ->
                 while (cursor.moveToNext()) {
@@ -305,12 +329,14 @@ class ScreenshotQueueDaoImpl(
                             eventDateMillis = if (cursor.isNull(8)) null else cursor.getLong(8),
                             targetCategoryId = cursor.getString(9),
                             eventDescription = cursor.getString(10),
-                            needsCloudUpgrade = true
+                            needsCloudUpgrade = true,
+                            isUserCategorized = if (cursor.columnCount > 11 && !cursor.isNull(11)) cursor.getInt(11) == 1 else false
                         )
                     )
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed querying cloud upgrade items", e)
         }
         return items
     }
@@ -323,7 +349,8 @@ class ScreenshotQueueDaoImpl(
                 put("updated_at", System.currentTimeMillis())
             }
             db.update(TABLE_QUEUE, values, "photo_id = ?", arrayOf(photoId))
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed marking queue item $photoId as $status", e)
         }
     }
 
@@ -340,7 +367,8 @@ class ScreenshotQueueDaoImpl(
             ).use { cursor ->
                 cursor.moveToFirst()
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed checking processed state for $photoId", e)
             false
         }
     }
@@ -361,26 +389,35 @@ class ScreenshotQueueDaoImpl(
         entities: String?,
         itemsToBuy: String?,
         photoTitle: String?,
-        originalFileName: String?
+        originalFileName: String?,
+        forceCategoryUpdate: Boolean
     ) {
         try {
             val db = dbProvider.writableDatabase
             val now = System.currentTimeMillis()
             var existingTitle: String? = null
             var existingOrigName: String? = null
-            if (photoTitle == null || originalFileName == null) {
-                db.rawQuery(
-                    "SELECT photo_title, original_file_name FROM $TABLE_QUEUE WHERE photo_id = ?",
-                    arrayOf(photoId)
-                ).use { c ->
-                    if (c.moveToFirst()) {
-                        if (!c.isNull(0)) existingTitle = c.getString(0)
-                        if (!c.isNull(1)) existingOrigName = c.getString(1)
-                    }
+            var existingTargetCategoryId: String? = null
+            var existingUserCategorized = false
+            db.rawQuery(
+                "SELECT photo_title, original_file_name, target_category_id, is_user_categorized FROM $TABLE_QUEUE WHERE photo_id = ?",
+                arrayOf(photoId)
+            ).use { c ->
+                if (c.moveToFirst()) {
+                    if (!c.isNull(0)) existingTitle = c.getString(0)
+                    if (!c.isNull(1)) existingOrigName = c.getString(1)
+                    if (!c.isNull(2)) existingTargetCategoryId = c.getString(2)
+                    if (!c.isNull(3)) existingUserCategorized = c.getInt(3) == 1
                 }
             }
             val finalTitle = photoTitle ?: existingTitle
             val finalOrigName = originalFileName ?: existingOrigName
+            val finalCategoryId = if (existingUserCategorized && !forceCategoryUpdate) {
+                existingTargetCategoryId
+            } else {
+                targetCategoryId
+            }
+            val finalUserCategorized = if (forceCategoryUpdate) false else existingUserCategorized
             val values = ContentValues().apply {
                 put("photo_id", photoId)
                 put("file_path", filePath)
@@ -390,12 +427,13 @@ class ScreenshotQueueDaoImpl(
                 put("detected_intent", detectedIntent)
                 put("event_title", eventTitle)
                 put("event_date_millis", eventDateMillis)
-                put("target_category_id", targetCategoryId)
+                put("target_category_id", finalCategoryId)
                 put("event_description", eventDescription)
                 put("summary", summary)
                 put("tags", tags)
                 put("entities", entities)
                 put("items_to_buy", itemsToBuy)
+                put("is_user_categorized", if (finalUserCategorized) 1 else 0)
                 if (!finalTitle.isNullOrBlank()) put("photo_title", finalTitle)
                 if (!finalOrigName.isNullOrBlank()) put("original_file_name", finalOrigName)
                 put("created_at", now)
@@ -411,12 +449,13 @@ class ScreenshotQueueDaoImpl(
         return try {
             val db = dbProvider.readableDatabase
             db.rawQuery(
-                "SELECT photo_id, file_path, scrubbed_text, detected_intent, event_title, event_date_millis, target_category_id, event_description, summary, tags, entities, items_to_buy, status, date_added, photo_title, original_file_name FROM $TABLE_QUEUE WHERE photo_id = ? AND status = 'COMPLETED'",
+                "SELECT photo_id, file_path, scrubbed_text, detected_intent, event_title, event_date_millis, target_category_id, event_description, summary, tags, entities, items_to_buy, status, date_added, photo_title, original_file_name, is_user_categorized FROM $TABLE_QUEUE WHERE photo_id = ? AND status = 'COMPLETED'",
                 arrayOf(photoId)
             ).use { cursor ->
                 if (cursor.moveToFirst()) cursor.toProcessedScreenshotRecord() else null
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed loading processed screenshot $photoId", e)
             null
         }
     }
@@ -429,7 +468,8 @@ class ScreenshotQueueDaoImpl(
                 put("updated_at", System.currentTimeMillis())
             }
             db.update(TABLE_QUEUE, values, "status = ?", arrayOf(QueueStatus.PROCESSING.name))
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed resetting hanging queue items", e)
         }
     }
 
@@ -442,7 +482,8 @@ class ScreenshotQueueDaoImpl(
             ).use { cursor ->
                 if (cursor.moveToFirst()) cursor.getInt(0) else 0
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed counting pending queue items", e)
             0
         }
     }
@@ -469,15 +510,17 @@ class ScreenshotQueueDaoImpl(
             var fallbackTitle: String? = null
             var fallbackOrigName: String? = null
             var oldStatus: String? = oldRecord?.status
+            var oldUserCategorized = oldRecord?.isUserCategorized ?: false
             if (oldRecord == null) {
                 db.rawQuery(
-                    "SELECT photo_title, original_file_name, status FROM $TABLE_QUEUE WHERE photo_id = ?",
+                    "SELECT photo_title, original_file_name, status, is_user_categorized FROM $TABLE_QUEUE WHERE photo_id = ?",
                     arrayOf(oldPhotoId)
                 ).use { c ->
                     if (c.moveToFirst()) {
                         if (!c.isNull(0)) fallbackTitle = c.getString(0)
                         if (!c.isNull(1)) fallbackOrigName = c.getString(1)
                         if (!c.isNull(2)) oldStatus = c.getString(2)
+                        if (!c.isNull(3)) oldUserCategorized = c.getInt(3) == 1
                     }
                 }
             }
@@ -511,6 +554,7 @@ class ScreenshotQueueDaoImpl(
                 put("tags", finalTags)
                 put("entities", finalEntities)
                 put("items_to_buy", finalItems)
+                put("is_user_categorized", if (oldUserCategorized) 1 else 0)
                 if (!finalPhotoTitle.isNullOrBlank()) put("photo_title", finalPhotoTitle)
                 if (!finalOrigName.isNullOrBlank()) put("original_file_name", finalOrigName)
                 put("created_at", now)
@@ -549,7 +593,7 @@ class ScreenshotQueueDaoImpl(
             val db = dbProvider.readableDatabase
             val placeholders = photoIds.joinToString(",") { "?" }
             db.rawQuery(
-                "SELECT photo_id, file_path, scrubbed_text, detected_intent, event_title, event_date_millis, target_category_id, event_description, summary, tags, entities, items_to_buy, status, date_added, photo_title, original_file_name FROM $TABLE_QUEUE WHERE photo_id IN ($placeholders) AND status = 'COMPLETED'",
+                "SELECT photo_id, file_path, scrubbed_text, detected_intent, event_title, event_date_millis, target_category_id, event_description, summary, tags, entities, items_to_buy, status, date_added, photo_title, original_file_name, is_user_categorized FROM $TABLE_QUEUE WHERE photo_id IN ($placeholders) AND status = 'COMPLETED'",
                 photoIds.toTypedArray()
             ).use { cursor ->
                 buildList {
@@ -558,7 +602,8 @@ class ScreenshotQueueDaoImpl(
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed querying processed screenshots by IDs", e)
             emptyList()
         }
     }
@@ -567,7 +612,7 @@ class ScreenshotQueueDaoImpl(
         return try {
             val db = dbProvider.readableDatabase
             db.rawQuery(
-                "SELECT photo_id, file_path, scrubbed_text, detected_intent, event_title, event_date_millis, target_category_id, event_description, summary, tags, entities, items_to_buy, status, date_added, photo_title, original_file_name FROM $TABLE_QUEUE WHERE status = 'COMPLETED'",
+                "SELECT photo_id, file_path, scrubbed_text, detected_intent, event_title, event_date_millis, target_category_id, event_description, summary, tags, entities, items_to_buy, status, date_added, photo_title, original_file_name, is_user_categorized FROM $TABLE_QUEUE WHERE status = 'COMPLETED'",
                 null
             ).use { cursor ->
                 buildList {
@@ -576,7 +621,8 @@ class ScreenshotQueueDaoImpl(
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed querying all completed screenshots", e)
             emptyList()
         }
     }
@@ -585,7 +631,7 @@ class ScreenshotQueueDaoImpl(
         return try {
             val db = dbProvider.readableDatabase
             db.rawQuery(
-                "SELECT photo_id, file_path, scrubbed_text, detected_intent, event_title, event_date_millis, target_category_id, event_description, summary, tags, entities, items_to_buy, status, date_added, photo_title, original_file_name FROM $TABLE_QUEUE WHERE status = 'COMPLETED' OR file_path LIKE '%.enc'",
+                "SELECT photo_id, file_path, scrubbed_text, detected_intent, event_title, event_date_millis, target_category_id, event_description, summary, tags, entities, items_to_buy, status, date_added, photo_title, original_file_name, is_user_categorized FROM $TABLE_QUEUE WHERE status = 'COMPLETED' OR file_path LIKE '%.enc'",
                 null
             ).use { cursor ->
                 buildList {
@@ -594,8 +640,55 @@ class ScreenshotQueueDaoImpl(
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed querying completed or vaulted screenshots", e)
             emptyList()
+        }
+    }
+
+    override fun updatePhotosCategoryInQueue(
+        photoIds: Collection<String>,
+        targetCategoryId: String?,
+        lockCategory: Boolean
+    ) {
+        if (photoIds.isEmpty()) return
+        try {
+            val db = dbProvider.writableDatabase
+            val now = System.currentTimeMillis()
+            db.beginTransaction()
+            try {
+                for (photoId in photoIds) {
+                    val values = ContentValues().apply {
+                        if (targetCategoryId != null) {
+                            put("target_category_id", targetCategoryId)
+                        } else {
+                            putNull("target_category_id")
+                        }
+                        put("is_user_categorized", if (lockCategory) 1 else 0)
+                        put("updated_at", now)
+                    }
+                    db.update(TABLE_QUEUE, values, "photo_id = ?", arrayOf(photoId))
+                }
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
+            }
+        } catch (e: Exception) {
+            logError("Failed updating category in queue for ${photoIds.size} photos", e)
+        }
+    }
+
+    override fun clearCategoryInQueue(categoryId: String) {
+        if (categoryId.isBlank()) return
+        try {
+            val db = dbProvider.writableDatabase
+            val values = ContentValues().apply {
+                putNull("target_category_id")
+                put("updated_at", System.currentTimeMillis())
+            }
+            db.update(TABLE_QUEUE, values, "target_category_id = ?", arrayOf(categoryId))
+        } catch (e: Exception) {
+            logError("Failed clearing category $categoryId from queue", e)
         }
     }
 
@@ -603,7 +696,9 @@ class ScreenshotQueueDaoImpl(
         try {
             val db = dbProvider.writableDatabase
             db.delete(TABLE_QUEUE, "photo_id = ?", arrayOf(photoId))
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            logError("Failed purging queue data for $photoId", e)
+        }
         ftsDao.removePhotoFts(photoId)
         vectorDao.deletePhotoVector(photoId)
         vectorDao.deletePhotoNeuralVector(photoId)

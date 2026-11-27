@@ -1,6 +1,6 @@
 package com.example.test2.ai
 
-import com.example.test2.database.DefaultCategories
+import com.example.test2.shared.models.DefaultCategories
 import com.example.test2.shared.models.Category
 import com.example.test2.shared.utils.VietnameseUtils
 import java.nio.ByteBuffer

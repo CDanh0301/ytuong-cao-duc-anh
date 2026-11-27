@@ -61,7 +61,8 @@ class VectorDaoImpl(
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed loading local vectors", e)
         }
         return result
     }
@@ -71,7 +72,8 @@ class VectorDaoImpl(
         try {
             val db = dbProvider.writableDatabase
             db.delete(TABLE_VECTORS, "photo_id = ?", arrayOf(photoId))
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed deleting local vector for $photoId", e)
         }
     }
 
@@ -94,7 +96,8 @@ class VectorDaoImpl(
                 put("updated_at", System.currentTimeMillis())
             }
             db.insertWithOnConflict(TABLE_NEURAL_VECTORS, null, values, SQLiteDatabase.CONFLICT_REPLACE) >= 0
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed saving neural vector for $photoId", e)
             false
         }
     }
@@ -152,7 +155,8 @@ class VectorDaoImpl(
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed loading neural vectors", e)
         }
         return result
     }
@@ -162,7 +166,8 @@ class VectorDaoImpl(
         try {
             val db = dbProvider.writableDatabase
             db.delete(TABLE_NEURAL_VECTORS, "photo_id = ?", arrayOf(photoId))
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed deleting neural vector for $photoId", e)
         }
     }
 
@@ -180,7 +185,8 @@ class VectorDaoImpl(
                     missingIds.add(cursor.getString(0))
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logError("Failed querying neural backfill IDs", e)
         }
         return missingIds
     }

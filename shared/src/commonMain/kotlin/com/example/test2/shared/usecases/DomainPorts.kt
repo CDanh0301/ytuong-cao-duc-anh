@@ -1,8 +1,11 @@
 package com.example.test2.shared.usecases
 
+import com.example.test2.shared.models.ActionCard
+import com.example.test2.shared.models.ActionCardType
 import com.example.test2.shared.models.Category
 import com.example.test2.shared.models.Folder
 import com.example.test2.shared.models.Photo
+import kotlinx.coroutines.flow.Flow
 
 data class DeviceScanOutput(
     val photos: List<Photo>,
@@ -98,6 +101,14 @@ interface QueueSyncPort {
         photoTitle: String?,
         originalFileName: String?
     ): Boolean
+
+    fun updatePhotosCategoryInQueue(
+        photoIds: Collection<String>,
+        targetCategoryId: String?,
+        lockCategory: Boolean = true
+    )
+
+    fun clearCategoryInQueue(categoryId: String)
 }
 
 interface PhotoStorageCleanerPort {
@@ -127,6 +138,7 @@ interface FtsIndexPort {
 
 interface AgingMonitorPort {
     suspend fun checkAgingAndNotify(force: Boolean): Triple<Long, Int, Long>
+    suspend fun checkAgingIfDue(): Triple<Long, Int, Long>? = null
     fun getLastCheckedInfo(): Triple<Long, Int, Long>
 }
 
@@ -136,4 +148,55 @@ interface PhotoImportPort {
     fun isJunkOrMeme(photo: Photo): Boolean
     suspend fun processWithCloud(photo: Photo, targetFolderId: String?)
     suspend fun processOnDevice(photo: Photo, targetFolderId: String?, targetCategoryIds: Set<String>)
+}
+
+data class CloudAiConfigData(
+    val apiKey: String,
+    val modelName: String,
+    val customEndpoint: String,
+    val isEnabled: Boolean,
+    val proxyBaseUrl: String = ""
+) {
+    fun isCloudReady(): Boolean = isEnabled &&
+        (proxyBaseUrl.isNotBlank() || customEndpoint.isNotBlank() || apiKey.isNotBlank())
+}
+
+interface ActionCardPort {
+    fun getActionCardsForPhoto(photoId: String): List<ActionCard>
+    fun getPhotoIdsByActionCardType(type: ActionCardType): Set<String>
+    suspend fun reextractCardsIfNeeded(photo: Photo): List<ActionCard>?
+    fun observeCardUpdates(): Flow<List<String>>
+}
+
+interface PhotoProcessingPort {
+    suspend fun scanPhotoWithCloud(photo: Photo, targetFolderId: String? = null)
+}
+
+interface WidgetPort {
+    fun cacheIsProAndUpdate(isPro: Boolean)
+    fun updateAll()
+}
+
+interface DeviceSecurityPort {
+    fun isDeviceSecure(): Boolean
+}
+
+interface CloudAiConfigPort {
+    fun getConfig(): CloudAiConfigData
+    fun saveConfig(apiKey: String, modelName: String, customEndpoint: String, enabled: Boolean)
+}
+
+interface BackgroundSyncPort {
+    fun scheduleBackgroundJobs()
+    fun resetHangingQueueItems()
+}
+
+interface MediaObserverPort {
+    fun register()
+    fun unregister()
+}
+
+interface MetadataSyncPort {
+    fun markMetadataDirty()
+    fun consumeMetadataDirty(): Boolean
 }

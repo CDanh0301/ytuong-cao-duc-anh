@@ -13,17 +13,16 @@ import android.view.View
 import android.widget.RemoteViews
 import com.example.test2.MainActivity
 import com.example.test2.R
-import com.example.test2.database.AppDatabaseHelper
+import com.example.test2.data.local.prefs.WidgetPrefsDataSource
+import com.example.test2.di.AppModule
 import com.example.test2.search.QuickSearchActivity
-import com.example.test2.security.PrivacyVaultManager
 import com.example.test2.shared.models.ActionCardType
-import com.example.test2.storage.AndroidFilePersistenceDriver
+import com.example.test2.util.AppLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import org.json.JSONObject
 
 data class PhotoSearchWidgetState(
     val addressCount: Int = 0,
@@ -44,8 +43,6 @@ class PhotoSearchWidgetProvider : AppWidgetProvider() {
         const val EXTRA_ACTION_CARD_TYPE = "com.example.test2.extra.WIDGET_ACTION_CARD_TYPE"
         const val EXPANDED_MIN_HEIGHT_DP = 96
 
-        private const val WIDGET_PREFS = "photo_search_widget_prefs"
-        private const val KEY_IS_PRO = "cached_is_pro"
         private const val REQ_CODE_SEARCH = 4100
         private const val REQ_CODE_ADDRESS = 4101
         private const val REQ_CODE_PAYMENT = 4102
@@ -60,23 +57,22 @@ class PhotoSearchWidgetProvider : AppWidgetProvider() {
         }
 
         fun cacheIsPro(context: Context, isPro: Boolean) {
-            context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE)
-                .edit()
-                .putBoolean(KEY_IS_PRO, isPro)
-                .apply()
+            WidgetPrefsDataSource(context).setCachedIsPro(isPro)
         }
 
         fun loadWidgetState(context: Context): PhotoSearchWidgetState {
-            val dbHelper = AppDatabaseHelper.getInstance(context)
-            val counts = dbHelper.getActionCardsPhotoCountByType()
-            val isVaultEnabled = PrivacyVaultManager.isVaultEnabled(context)
+            val dbHelper = AppModule.provideAppDatabaseHelper(context)
+            val actionCardDao = AppModule.provideActionCardDao(dbHelper)
+            val vaultManager = AppModule.provideVaultManager(context)
+            val counts = actionCardDao.getActionCardsPhotoCountByType()
+            val isVaultEnabled = vaultManager.isVaultEnabled()
 
-            val prefs = context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE)
-            val isPro = if (prefs.contains(KEY_IS_PRO)) {
-                prefs.getBoolean(KEY_IS_PRO, false)
+            val widgetPrefs = WidgetPrefsDataSource(context)
+            val isPro = if (widgetPrefs.hasCachedIsPro()) {
+                widgetPrefs.getCachedIsPro()
             } else {
                 val parsedPro = readIsProFromPersistence(context)
-                cacheIsPro(context, parsedPro)
+                widgetPrefs.setCachedIsPro(parsedPro)
                 parsedPro
             }
 
@@ -91,13 +87,9 @@ class PhotoSearchWidgetProvider : AppWidgetProvider() {
 
         private fun readIsProFromPersistence(context: Context): Boolean {
             return try {
-                val raw = runBlocking { AndroidFilePersistenceDriver(context).loadData() }
-                if (raw.isNullOrBlank()) {
-                    false
-                } else {
-                    JSONObject(raw).optJSONObject("accountTier")?.optBoolean("isPro", false) ?: false
-                }
-            } catch (_: Exception) {
+                runBlocking { AppModule.provideAppDataSource(context).isProTier() }
+            } catch (e: Exception) {
+                AppLogger.w("PhotoSearchWidget", "Failed reading tier from persistence", e)
                 false
             }
         }

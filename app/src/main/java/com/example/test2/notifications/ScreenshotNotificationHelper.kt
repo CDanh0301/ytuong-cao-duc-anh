@@ -163,8 +163,15 @@ object ScreenshotNotificationHelper {
     fun showAgingNotification(
         context: Context,
         clutterCount: Int,
-        reclaimableBytes: Long
+        reclaimableBytes: Long,
+        retentionDays: Int = 30
     ) {
+        if (clutterCount <= 0) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
         createAgingNotificationChannel(context)
 
         val appIntent = Intent(context, MainActivity::class.java).apply {
@@ -180,12 +187,13 @@ object ScreenshotNotificationHelper {
         )
 
         val sizeFormatted = formatFileSize(reclaimableBytes)
-        val messageText = "Bạn có $clutterCount ảnh chụp màn hình cũ (~$sizeFormatted) sẵn sàng để dọn dẹp. Chạm để xem và dọn rác."
+        val shortText = "Máy còn tồn đọng $clutterCount ảnh cũ có thể xóa (~$sizeFormatted)."
+        val messageText = "Máy còn tồn đọng $clutterCount ảnh chụp màn hình cũ hơn $retentionDays ngày (~$sizeFormatted) có thể xóa. Chạm để xem và dọn dẹp."
 
         val builder = NotificationCompat.Builder(context, CHANNEL_AGING_ID)
             .setSmallIcon(android.R.drawable.ic_menu_delete)
             .setContentTitle("Dọn dẹp ảnh chụp màn hình cũ")
-            .setContentText("Bạn có $clutterCount ảnh chụp màn hình cũ (~$sizeFormatted) sẵn sàng để dọn dẹp.")
+            .setContentText(shortText)
             .setStyle(NotificationCompat.BigTextStyle().bigText(messageText))
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setAutoCancel(true)
@@ -198,6 +206,13 @@ object ScreenshotNotificationHelper {
 
         try {
             NotificationManagerCompat.from(context).notify(NOTIFICATION_AGING_ID, builder.build())
+        } catch (_: SecurityException) {
+        }
+    }
+
+    fun cancelAgingNotification(context: Context) {
+        try {
+            NotificationManagerCompat.from(context).cancel(NOTIFICATION_AGING_ID)
         } catch (_: SecurityException) {
         }
     }

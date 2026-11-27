@@ -1,7 +1,20 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
 }
+
+val localProps = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) {
+        file.inputStream().use { load(it) }
+    }
+}
+val rawProxyUrl = (localProps.getProperty("CLOUD_AI_PROXY_URL")
+    ?: System.getenv("CLOUD_AI_PROXY_URL")
+    ?: "").trim()
+val escapedProxyUrl = rawProxyUrl.replace("\\", "\\\\").replace("\"", "\\\"")
 
 android {
     namespace = "com.example.test2"
@@ -17,6 +30,7 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "CLOUD_AI_PROXY_URL", "\"$escapedProxyUrl\"")
     }
 
     buildTypes {

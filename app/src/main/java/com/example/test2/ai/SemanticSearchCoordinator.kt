@@ -3,9 +3,14 @@ package com.example.test2.ai
 import android.content.Context
 import com.example.test2.data.local.dao.FtsSearchDao
 import com.example.test2.data.local.dao.VectorDao
+import com.example.test2.data.local.prefs.CloudAiDefaults
+import com.example.test2.data.local.prefs.CloudAiPrefsDataSource
+import com.example.test2.data.local.prefs.VectorPrefsDataSource
+import com.example.test2.data.remote.GeminiApiService
+import com.example.test2.data.remote.GeminiApiServiceImpl
 import com.example.test2.database.AppDatabaseHelper
 import com.example.test2.services.CloudUpgradeWorker
-import com.example.test2.shared.repository.PhotoRepository
+import com.example.test2.shared.repository.IPhotoRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
@@ -22,13 +27,17 @@ data class SearchCoordinatorResult(
  */
 class SemanticSearchCoordinator(
     private val context: Context,
-    private val repository: PhotoRepository,
+    private val repository: IPhotoRepository,
     private val ftsDao: FtsSearchDao,
-    private val vectorDao: VectorDao
+    private val vectorDao: VectorDao,
+    private val geminiApiService: GeminiApiService = GeminiApiServiceImpl(context),
+    private val cloudAiPrefs: CloudAiPrefsDataSource = CloudAiPrefsDataSource(context),
+    private val vectorPrefs: VectorPrefsDataSource = VectorPrefsDataSource(context)
 ) {
+    @Deprecated("Use constructor with DAO interfaces and GeminiApiService")
     constructor(
         context: Context,
-        repository: PhotoRepository,
+        repository: IPhotoRepository,
         dbHelper: AppDatabaseHelper
     ) : this(context, repository, dbHelper, dbHelper)
     // Phase 3: In-memory cache for query neural embeddings to prevent redundant network calls
@@ -57,8 +66,9 @@ class SemanticSearchCoordinator(
         val cleanQuery = parsedQuery.cleanTextQuery
         val dateRange = parsedQuery.dateRangeMillis
 
-        // Phase 5: Privacy hardening - Scrub query of any phone, card, account, or email numbers before cloud
-        val scrubbedQuery = PiiScrubber.scrub(cleanQuery).scrubbedText
+        // Phase 5: Privacy hardening - Scrub query via CloudPrivacyGateway before any cloud embedding
+        val cloudQueryCheck = CloudPrivacyGateway.prepareTextForEmbedding(cleanQuery)
+        val scrubbedQuery = cloudQueryCheck.scrubbedText
 
         // 1. FTS5 BM25 Ranked keyword search
         val ftsRankedList = if (cleanQuery.isNotBlank()) {
@@ -71,19 +81,19 @@ class SemanticSearchCoordinator(
         val isPro = repository.accountTier.value.isPro
 
         if (isPro) {
-            val apiKey = CloudAiConfigManager.getApiKey(context)
+            val aiConfig = cloudAiPrefs.getConfig()
             val neuralVectors = vectorDao.getAllPhotoNeuralVectors()
 
             var vectorRankedList: List<Pair<String, Float>> = emptyList()
 
             // Pro cloud semantic embedding with RETRIEVAL_QUERY taskType and in-memory cache
-            if (apiKey.isNotBlank() && scrubbedQuery.isNotBlank() && neuralVectors.isNotEmpty()) {
+            if (aiConfig.isCloudReady() && cloudQueryCheck.isMeaningfulForCloud && neuralVectors.isNotEmpty()) {
                 var queryNeuralVec = queryEmbeddingCache[scrubbedQuery]
                 if (queryNeuralVec == null) {
-                    queryNeuralVec = CloudAiBackendClient.getEmbedding(
+                    queryNeuralVec = geminiApiService.getEmbedding(
                         text = scrubbedQuery,
-                        apiKey = apiKey,
-                        modelName = CloudAiConfigManager.DEFAULT_EMBEDDING_MODEL,
+                        apiKey = aiConfig.apiKey,
+                        modelName = CloudAiDefaults.DEFAULT_EMBEDDING_MODEL,
                         taskType = "RETRIEVAL_QUERY"
                     )
                     if (queryNeuralVec != null) {
@@ -158,8 +168,7 @@ class SemanticSearchCoordinator(
         val isPro = repository.accountTier.value.isPro
         if (!isPro) return@withContext
 
-        val prefs = context.getSharedPreferences("vector_prefs", Context.MODE_PRIVATE)
-        val currentClusterVersion = prefs.getInt("vector_cluster_version", 0)
+        val currentClusterVersion = vectorPrefs.getClusterVersion()
         val mustReindex = forceReindex || currentClusterVersion < CURRENT_VECTOR_CLUSTER_VERSION
 
         val allVectors = if (mustReindex) emptyMap() else vectorDao.getAllPhotoVectors()
@@ -190,7 +199,7 @@ class SemanticSearchCoordinator(
         }
 
         if (mustReindex) {
-            prefs.edit().putInt("vector_cluster_version", CURRENT_VECTOR_CLUSTER_VERSION).apply()
+            vectorPrefs.setClusterVersion(CURRENT_VECTOR_CLUSTER_VERSION)
         }
 
         // Phase 2: Backfill neural vectors on model version 1.0

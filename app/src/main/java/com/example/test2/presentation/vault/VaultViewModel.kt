@@ -1,40 +1,48 @@
 package com.example.test2.presentation.vault
 
-import android.app.Application
-import android.content.Intent
-import androidx.fragment.app.FragmentActivity
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.test2.di.AppContainer
-import com.example.test2.security.DeviceAuthManager
+import com.example.test2.security.IVaultManager
 import com.example.test2.shared.models.Photo
+import com.example.test2.shared.repository.IPhotoRepository
+import com.example.test2.shared.usecases.DeviceSecurityPort
+import com.example.test2.shared.usecases.WidgetPort
 import com.example.test2.storage.isEncryptedPath
-import com.example.test2.ui.RestoreProgress
-import com.example.test2.widget.PhotoSearchWidgetUpdater
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
 /**
- * ViewModel dedicated to Privacy Vault locking, consent/permission dialogs, and photo vault/restore operations.
+ * Pure MVVM ViewModel dedicated to Privacy Vault locking, consent/permission dialogs,
+ * and photo vault/restore operations without coupling to Android UI/Context APIs.
  */
 class VaultViewModel(
-    private val app: Application,
-    private val container: AppContainer
-) : AndroidViewModel(app) {
+    private val repository: IPhotoRepository,
+    private val vaultManager: IVaultManager,
+    private val deviceSecurity: DeviceSecurityPort,
+    private val vaultCoordinator: VaultActionCoordinator,
+    private val widgetPort: WidgetPort,
+    private val vaultState: VaultStateStore
+) : ViewModel() {
 
-    private val repository = container.repository
-    private val vaultManager = container.vaultManager
-    private val vaultCoordinator = container.vaultActionCoordinator
-    private val session = container.sessionState
+    private val _events = MutableSharedFlow<VaultUiEvent>(extraBufferCapacity = 4)
+    val events: SharedFlow<VaultUiEvent> = _events.asSharedFlow()
+
+    private val protectedCountFlow = repository.photos.map { list ->
+        list.count { it.filePath.isEncryptedPath() || (it.isScreenshot && !it.filePath.startsWith("content://")) }
+    }
 
     private val lockDialogsFlow = combine(
-        session.isVaultEnabled,
-        session.isAppUnlocked,
-        session.showPrivacyConsentDialog,
-        session.showAllFilesAccessDialog,
-        session.showEnableVaultScopeDialog
+        vaultState.isVaultEnabled,
+        vaultState.isAppUnlocked,
+        vaultState.showPrivacyConsentDialog,
+        vaultState.showAllFilesAccessDialog,
+        vaultState.showEnableVaultScopeDialog
     ) { enabled, unlocked, consent, allFiles, scope ->
         VaultUiState(
             isVaultEnabled = enabled,
@@ -46,11 +54,11 @@ class VaultViewModel(
     }
 
     private val restoreDialogsFlow = combine(
-        session.showDisableVaultDialog,
-        session.isRestoringPhotos,
-        session.restoreProgress,
-        session.showRestoreSuccessBanner,
-        session.showRequireDeviceLockDialog
+        vaultState.showDisableVaultDialog,
+        vaultState.isRestoringPhotos,
+        vaultState.restoreProgress,
+        vaultState.showRestoreSuccessBanner,
+        vaultState.showRequireDeviceLockDialog
     ) { disableDlg, restoring, progress, successBanner, requireLock ->
         VaultUiState(
             showDisableVaultDialog = disableDlg,
@@ -64,9 +72,11 @@ class VaultViewModel(
     val uiState: StateFlow<VaultUiState> = combine(
         lockDialogsFlow,
         restoreDialogsFlow,
-        session.showVaultPermissionDeniedBanner
-    ) { lockState, restoreState, deniedBanner ->
+        vaultState.showVaultPermissionDeniedBanner,
+        protectedCountFlow
+    ) { lockState, restoreState, deniedBanner, protectedCount ->
         lockState.copy(
+            protectedPhotoCount = protectedCount,
             showDisableVaultDialog = restoreState.showDisableVaultDialog,
             isRestoringPhotos = restoreState.isRestoringPhotos,
             restoreProgress = restoreState.restoreProgress,
@@ -76,31 +86,37 @@ class VaultViewModel(
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, VaultUiState())
 
-    fun authenticate(
-        activity: FragmentActivity,
-        onSuccess: () -> Unit = { unlockApp() },
-        onError: (Int, CharSequence) -> Unit = { _, _ -> }
-    ) = DeviceAuthManager.authenticate(activity = activity, onSuccess = onSuccess, onError = onError)
+    fun requestBiometricUnlock() {
+        _events.tryEmit(VaultUiEvent.RequestBiometricUnlock)
+    }
 
-    fun getManageAllFilesIntent(): Intent = vaultManager.getManageAllFilesIntent()
+    fun openAllFilesSettings() {
+        vaultState.showAllFilesAccessDialog.value = false
+        _events.tryEmit(VaultUiEvent.OpenAllFilesSettings)
+    }
 
-    fun dismissRequireDeviceLockDialog() { session.showRequireDeviceLockDialog.value = false }
-    fun dismissVaultPermissionDeniedBanner() { session.showVaultPermissionDeniedBanner.value = null }
-    fun dismissRestoreSuccessBanner() { session.showRestoreSuccessBanner.value = null }
-    fun dismissAllFilesAccessDialog() { session.showAllFilesAccessDialog.value = false }
-    fun dismissEnableVaultScopeDialog() { session.showEnableVaultScopeDialog.value = false }
-    fun dismissDisableVaultDialog() { session.showDisableVaultDialog.value = false }
+    fun openDeviceLockSettings() {
+        vaultState.showRequireDeviceLockDialog.value = false
+        _events.tryEmit(VaultUiEvent.OpenDeviceLockSettings)
+    }
+
+    fun dismissRequireDeviceLockDialog() { vaultState.showRequireDeviceLockDialog.value = false }
+    fun dismissVaultPermissionDeniedBanner() { vaultState.showVaultPermissionDeniedBanner.value = null }
+    fun dismissRestoreSuccessBanner() { vaultState.showRestoreSuccessBanner.value = null }
+    fun dismissAllFilesAccessDialog() { vaultState.showAllFilesAccessDialog.value = false }
+    fun dismissEnableVaultScopeDialog() { vaultState.showEnableVaultScopeDialog.value = false }
+    fun dismissDisableVaultDialog() { vaultState.showDisableVaultDialog.value = false }
 
     fun cancelAllFilesAccessDialog() {
         vaultManager.setPendingVaultScope(null)
-        session.showAllFilesAccessDialog.value = false
+        vaultState.showAllFilesAccessDialog.value = false
     }
 
     fun onEnableVault() {
         vaultManager.setPromptedConsent(true)
-        session.showPrivacyConsentDialog.value = false
-        if (!DeviceAuthManager.isDeviceSecure(app)) {
-            session.showRequireDeviceLockDialog.value = true
+        vaultState.showPrivacyConsentDialog.value = false
+        if (!deviceSecurity.isDeviceSecure()) {
+            vaultState.showRequireDeviceLockDialog.value = true
             return
         }
         confirmEnableVault(vaultAll = true)
@@ -109,9 +125,9 @@ class VaultViewModel(
     fun onKeepStandard() {
         vaultManager.setVaultEnabled(false)
         vaultManager.setPromptedConsent(true)
-        session.isVaultEnabled.value = false
-        session.isAppUnlocked.value = true
-        session.showPrivacyConsentDialog.value = false
+        vaultState.isVaultEnabled.value = false
+        vaultState.isAppUnlocked.value = true
+        vaultState.showPrivacyConsentDialog.value = false
     }
 
     fun setVaultEnabled(enabled: Boolean) {
@@ -119,10 +135,10 @@ class VaultViewModel(
     }
 
     fun requestEnableVault() {
-        if (!DeviceAuthManager.isDeviceSecure(app)) {
-            session.showRequireDeviceLockDialog.value = true
+        if (!deviceSecurity.isDeviceSecure()) {
+            vaultState.showRequireDeviceLockDialog.value = true
         } else {
-            session.showEnableVaultScopeDialog.value = true
+            vaultState.showEnableVaultScopeDialog.value = true
         }
     }
 
@@ -130,17 +146,17 @@ class VaultViewModel(
         vaultCoordinator.confirmEnableVault(vaultAll, viewModelScope)
 
     fun notifyAppBackgrounded() {
-        session.lastBackgroundTimestamp = System.currentTimeMillis()
+        vaultState.lastBackgroundTimestamp = System.currentTimeMillis()
     }
 
     fun unlockApp() {
-        session.isAppUnlocked.value = true
-        session.lastBackgroundTimestamp = 0L
+        vaultState.isAppUnlocked.value = true
+        vaultState.lastBackgroundTimestamp = 0L
     }
 
     fun lockApp() {
-        if (session.isVaultEnabled.value) {
-            session.isAppUnlocked.value = false
+        if (vaultState.isVaultEnabled.value) {
+            vaultState.isAppUnlocked.value = false
         }
     }
 
@@ -149,14 +165,14 @@ class VaultViewModel(
             it.filePath.isEncryptedPath() || (it.isScreenshot && !it.filePath.startsWith("content://"))
         }
         if (vaultedCount > 0) {
-            session.showDisableVaultDialog.value = true
+            vaultState.showDisableVaultDialog.value = true
         } else {
             vaultManager.setVaultEnabled(false)
             vaultManager.clearAllRestoredExempts()
-            session.isVaultEnabled.value = false
-            session.isAppUnlocked.value = true
-            session.showDisableVaultDialog.value = false
-            PhotoSearchWidgetUpdater.updateAll(app)
+            vaultState.isVaultEnabled.value = false
+            vaultState.isAppUnlocked.value = true
+            vaultState.showDisableVaultDialog.value = false
+            widgetPort.updateAll()
         }
     }
 
